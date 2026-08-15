@@ -1,0 +1,4 @@
+respondent_public_id,question_code,variable_code,raw_code,numeric_value,text_value,is_missing
+1522b932-6189-4af3-bb81-ce268cae133d,EDAD,,,20.0,,False
+256f3180-276f-4526-938c-ea4f3f8683bc,EDAD,,,25.0,,False
+23f2f63f-659c-42c2-bb73-89ad2556dd46,EDAD,,,30.0,,False

@@ -1,0 +1,50 @@
+{
+  "study": {
+    "id": 1,
+    "public_id": "20e8ab7f-0928-419b-838b-fcf1d454142a",
+    "name": "Estudio BSC",
+    "study_type": "ACADEMIC",
+    "status": "OPEN"
+  },
+  "generated_at": "2026-08-13T16:52:38.638939+00:00",
+  "analysis_results": [
+    {
+      "result_type": "DESCRIPTIVE",
+      "result_code": "p1",
+      "n_valid": 3,
+      "numeric_value": 2.0,
+      "statistic_value": null,
+      "p_value": null,
+      "effect_size": null,
+      "result_data": {
+        "n_valid": 3,
+        "mean": 2.0,
+        "median": 2.0,
+        "mode": 1.0,
+        "std": 1.0,
+        "variance": 1.0,
+        "min": 1.0,
+        "max": 3.0,
+        "quartiles": [
+          1.5,
+          2.0,
+          2.5
+        ]
+      }
+    }
+  ],
+  "censopas_results": [],
+  "barem_results": {
+    "study_id": 1,
+    "study_name": "Estudio BSC",
+    "study_type": "ACADEMIC",
+    "analysis_run_id": null,
+    "algorithm_version": null,
+    "instrument_version_id": 1,
+    "barem_id": null,
+    "barem_name": null,
+    "n_completed": 3,
+    "min_publishable_n": 5,
+    "results": []
+  }
+}

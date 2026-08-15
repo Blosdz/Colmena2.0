@@ -1,0 +1,481 @@
+{
+  "study": {
+    "id": 1,
+    "public_id": "e23e6959-ed06-4eab-a3c2-517e850faffe",
+    "name": "Estudio spearman",
+    "study_type": "ACADEMIC",
+    "status": "OPEN"
+  },
+  "generated_at": "2026-08-14T21:59:20.815922+00:00",
+  "report_mode": "PROVISIONAL",
+  "sections": [],
+  "methodological_status": {
+    "instrument_version_id": 1,
+    "version_kind": "UNKNOWN",
+    "ready_for_scoring": false,
+    "ready_for_official_reporting": false,
+    "expected": {},
+    "actual": {
+      "questions": 3,
+      "scored": 1,
+      "descriptive": 2,
+      "dimensions": 1,
+      "subdimensions": 0,
+      "scoring_rules": 0,
+      "linked_scored": 1
+    },
+    "errors": [
+      "UNSUPPORTED_CENSOPAS_VERSION",
+      "MISSING_VALIDATED_SCORING_RULES"
+    ],
+    "warnings": [
+      "OFFICIAL_BAREM_NOT_AVAILABLE",
+      "OFFICIAL_EQUIVALENCE_DISABLED"
+    ]
+  },
+  "analysis_results": [
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "VAR_x_D1",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 1.0,
+      "p_value": 0.0,
+      "adjusted_p_value": 0.0,
+      "effect_size": 1.0,
+      "effect_label": "FUERTE",
+      "ci_lower": null,
+      "ci_upper": null,
+      "text_value": null,
+      "result_data": {
+        "x_key": "construct:1",
+        "y_key": "construct:2",
+        "rho": 1.0,
+        "p_value": 0.0,
+        "adjusted_p_value": 0.0,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "VAR_x_x1",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 0.9856107606,
+      "p_value": 0.0003090857,
+      "adjusted_p_value": 0.0003090857,
+      "effect_size": 0.9856107606,
+      "effect_label": "FUERTE",
+      "ci_lower": null,
+      "ci_upper": null,
+      "text_value": null,
+      "result_data": {
+        "x_key": "construct:1",
+        "y_key": "variable:1",
+        "rho": 0.9856107606091624,
+        "p_value": 0.0003090856678496653,
+        "adjusted_p_value": 0.0003090856678496653,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "VAR_x_x2",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 0.9856107606,
+      "p_value": 0.0003090857,
+      "adjusted_p_value": 0.0003090857,
+      "effect_size": 0.9856107606,
+      "effect_label": "FUERTE",
+      "ci_lower": null,
+      "ci_upper": null,
+      "text_value": null,
+      "result_data": {
+        "x_key": "construct:1",
+        "y_key": "variable:2",
+        "rho": 0.9856107606091624,
+        "p_value": 0.0003090856678496653,
+        "adjusted_p_value": 0.0003090856678496653,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "D1_x_x1",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 0.9856107606,
+      "p_value": 0.0003090857,
+      "adjusted_p_value": 0.0003090857,
+      "effect_size": 0.9856107606,
+      "effect_label": "FUERTE",
+      "ci_lower": null,
+      "ci_upper": null,
+      "text_value": null,
+      "result_data": {
+        "x_key": "construct:2",
+        "y_key": "variable:1",
+        "rho": 0.9856107606091624,
+        "p_value": 0.0003090856678496653,
+        "adjusted_p_value": 0.0003090856678496653,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "D1_x_x2",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 0.9856107606,
+      "p_value": 0.0003090857,
+      "adjusted_p_value": 0.0003090857,
+      "effect_size": 0.9856107606,
+      "effect_label": "FUERTE",
+      "ci_lower": null,
+      "ci_upper": null,
+      "text_value": null,
+      "result_data": {
+        "x_key": "construct:2",
+        "y_key": "variable:2",
+        "rho": 0.9856107606091624,
+        "p_value": 0.0003090856678496653,
+        "adjusted_p_value": 0.0003090856678496653,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "x1_x_x2",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 1.0,
+      "p_value": 0.0,
+      "adjusted_p_value": 0.0,
+      "effect_size": 1.0,
+      "effect_label": "FUERTE",
+      "ci_lower": null,
+      "ci_upper": null,
+      "text_value": null,
+      "result_data": {
+        "x_key": "variable:1",
+        "y_key": "variable:2",
+        "rho": 1.0,
+        "p_value": 0.0,
+        "adjusted_p_value": 0.0,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    }
+  ],
+  "censopas_results": [
+    {
+      "construct_id": 1,
+      "construct_code": "VAR",
+      "construct_name": "Variable",
+      "n_valid": 6,
+      "suppressed": false,
+      "classification_status": "UNCLASSIFIED",
+      "favorable_n": 0,
+      "intermediate_n": 0,
+      "unfavorable_n": 0,
+      "favorable_pct": 0.0,
+      "intermediate_pct": 0.0,
+      "unfavorable_pct": 0.0,
+      "construct_score": 50.0,
+      "collective_classification": null
+    },
+    {
+      "construct_id": 2,
+      "construct_code": "D1",
+      "construct_name": "Dimensión",
+      "n_valid": 6,
+      "suppressed": false,
+      "classification_status": "UNCLASSIFIED",
+      "favorable_n": 0,
+      "intermediate_n": 0,
+      "unfavorable_n": 0,
+      "favorable_pct": 0.0,
+      "intermediate_pct": 0.0,
+      "unfavorable_pct": 0.0,
+      "construct_score": 50.0,
+      "collective_classification": null
+    }
+  ],
+  "barem_results": {
+    "study_id": 1,
+    "study_name": "Estudio spearman",
+    "study_type": "ACADEMIC",
+    "instrument_id": 1,
+    "instrument_name": "Escala propia",
+    "instrument_version_code": "V1",
+    "analysis_run_id": 1,
+    "algorithm_version": "likert-baremos-v1",
+    "instrument_version_id": 1,
+    "barem_id": null,
+    "barem_name": null,
+    "n_completed": 6,
+    "min_publishable_n": 5,
+    "results": [
+      {
+        "construct_id": 1,
+        "parent_id": null,
+        "construct_code": "VAR",
+        "construct_name": "Variable",
+        "construct_type": "VARIABLE",
+        "n_valid": 6,
+        "suppressed": false,
+        "mean_score": 50.0,
+        "median_score": 50.0,
+        "priority_rank": 1,
+        "bands": []
+      },
+      {
+        "construct_id": 2,
+        "parent_id": 1,
+        "construct_code": "D1",
+        "construct_name": "Dimensión",
+        "construct_type": "DIMENSION",
+        "n_valid": 6,
+        "suppressed": false,
+        "mean_score": 50.0,
+        "median_score": 50.0,
+        "priority_rank": 2,
+        "bands": []
+      }
+    ]
+  },
+  "action_plans": [],
+  "premium_analytics": {
+    "status": "AVAILABLE",
+    "methods": [
+      "SPEARMAN"
+    ],
+    "result_count": 6,
+    "significant_result_count": 6,
+    "privacy": {
+      "minimum_n": 5,
+      "individual_assignments_removed": true,
+      "small_group_results_removed": true
+    },
+    "limitations": [
+      "Los resultados premium complementan y no modifican el semáforo CENSOPAS.",
+      "Las asociaciones no demuestran causalidad.",
+      "K-means es exploratorio y no publica asignaciones individuales.",
+      "La regresión no debe utilizarse para decisiones laborales individuales."
+    ],
+    "results": [
+      {
+        "result_type": "SPEARMAN",
+        "result_code": "VAR_x_D1",
+        "n_valid": 6,
+        "numeric_value": null,
+        "statistic_value": 1.0,
+        "p_value": 0.0,
+        "adjusted_p_value": 0.0,
+        "effect_size": 1.0,
+        "effect_label": "FUERTE",
+        "ci_lower": null,
+        "ci_upper": null,
+        "text_value": null,
+        "result_data": {
+          "x_key": "construct:1",
+          "y_key": "construct:2",
+          "rho": 1.0,
+          "p_value": 0.0,
+          "adjusted_p_value": 0.0,
+          "n": 6,
+          "magnitude": "FUERTE",
+          "significant": true,
+          "warnings": []
+        }
+      },
+      {
+        "result_type": "SPEARMAN",
+        "result_code": "VAR_x_x1",
+        "n_valid": 6,
+        "numeric_value": null,
+        "statistic_value": 0.9856107606,
+        "p_value": 0.0003090857,
+        "adjusted_p_value": 0.0003090857,
+        "effect_size": 0.9856107606,
+        "effect_label": "FUERTE",
+        "ci_lower": null,
+        "ci_upper": null,
+        "text_value": null,
+        "result_data": {
+          "x_key": "construct:1",
+          "y_key": "variable:1",
+          "rho": 0.9856107606091624,
+          "p_value": 0.0003090856678496653,
+          "adjusted_p_value": 0.0003090856678496653,
+          "n": 6,
+          "magnitude": "FUERTE",
+          "significant": true,
+          "warnings": []
+        }
+      },
+      {
+        "result_type": "SPEARMAN",
+        "result_code": "VAR_x_x2",
+        "n_valid": 6,
+        "numeric_value": null,
+        "statistic_value": 0.9856107606,
+        "p_value": 0.0003090857,
+        "adjusted_p_value": 0.0003090857,
+        "effect_size": 0.9856107606,
+        "effect_label": "FUERTE",
+        "ci_lower": null,
+        "ci_upper": null,
+        "text_value": null,
+        "result_data": {
+          "x_key": "construct:1",
+          "y_key": "variable:2",
+          "rho": 0.9856107606091624,
+          "p_value": 0.0003090856678496653,
+          "adjusted_p_value": 0.0003090856678496653,
+          "n": 6,
+          "magnitude": "FUERTE",
+          "significant": true,
+          "warnings": []
+        }
+      },
+      {
+        "result_type": "SPEARMAN",
+        "result_code": "D1_x_x1",
+        "n_valid": 6,
+        "numeric_value": null,
+        "statistic_value": 0.9856107606,
+        "p_value": 0.0003090857,
+        "adjusted_p_value": 0.0003090857,
+        "effect_size": 0.9856107606,
+        "effect_label": "FUERTE",
+        "ci_lower": null,
+        "ci_upper": null,
+        "text_value": null,
+        "result_data": {
+          "x_key": "construct:2",
+          "y_key": "variable:1",
+          "rho": 0.9856107606091624,
+          "p_value": 0.0003090856678496653,
+          "adjusted_p_value": 0.0003090856678496653,
+          "n": 6,
+          "magnitude": "FUERTE",
+          "significant": true,
+          "warnings": []
+        }
+      },
+      {
+        "result_type": "SPEARMAN",
+        "result_code": "D1_x_x2",
+        "n_valid": 6,
+        "numeric_value": null,
+        "statistic_value": 0.9856107606,
+        "p_value": 0.0003090857,
+        "adjusted_p_value": 0.0003090857,
+        "effect_size": 0.9856107606,
+        "effect_label": "FUERTE",
+        "ci_lower": null,
+        "ci_upper": null,
+        "text_value": null,
+        "result_data": {
+          "x_key": "construct:2",
+          "y_key": "variable:2",
+          "rho": 0.9856107606091624,
+          "p_value": 0.0003090856678496653,
+          "adjusted_p_value": 0.0003090856678496653,
+          "n": 6,
+          "magnitude": "FUERTE",
+          "significant": true,
+          "warnings": []
+        }
+      },
+      {
+        "result_type": "SPEARMAN",
+        "result_code": "x1_x_x2",
+        "n_valid": 6,
+        "numeric_value": null,
+        "statistic_value": 1.0,
+        "p_value": 0.0,
+        "adjusted_p_value": 0.0,
+        "effect_size": 1.0,
+        "effect_label": "FUERTE",
+        "ci_lower": null,
+        "ci_upper": null,
+        "text_value": null,
+        "result_data": {
+          "x_key": "variable:1",
+          "y_key": "variable:2",
+          "rho": 1.0,
+          "p_value": 0.0,
+          "adjusted_p_value": 0.0,
+          "n": 6,
+          "magnitude": "FUERTE",
+          "significant": true,
+          "warnings": []
+        }
+      }
+    ]
+  },
+  "traceability": {
+    "lineage": [
+      "responses.raw_code",
+      "response_scores.risk_value",
+      "response_scores.score_0_100",
+      "construct_scores.score_0_100",
+      "construct_results",
+      "report_run"
+    ],
+    "instrument_version_id": 1,
+    "version_kind": "UNKNOWN",
+    "manifest_hash": null,
+    "barem": null,
+    "analysis_runs": [
+      {
+        "analysis_type": "LIKERT_SCORING",
+        "status": "COMPLETED",
+        "engine": "PYTHON",
+        "engine_version": "scipy",
+        "algorithm_version": "likert-baremos-v1",
+        "input_hash": null,
+        "completed_at": "2026-08-14T21:59:20.785217"
+      },
+      {
+        "analysis_type": "SPEARMAN_MATRIX",
+        "status": "COMPLETED",
+        "engine": "PYTHON",
+        "engine_version": "scipy",
+        "algorithm_version": "analytics-v1",
+        "input_hash": null,
+        "completed_at": "2026-08-14T21:59:20.806879"
+      }
+    ],
+    "privacy": {
+      "min_publishable_n": 5,
+      "individual_records_included": false,
+      "secondary_suppression": true
+    },
+    "report": {
+      "mode": "PROVISIONAL",
+      "sections": [],
+      "generated_at": "2026-08-14T21:59:20.815922+00:00"
+    }
+  }
+}

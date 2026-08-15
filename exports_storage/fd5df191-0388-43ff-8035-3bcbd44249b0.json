@@ -1,0 +1,29 @@
+[
+  {
+    "case_id": 1,
+    "question_code": "EDAD",
+    "variable_code": null,
+    "raw_code": null,
+    "numeric_value": 20.0,
+    "text_value": null,
+    "is_missing": false
+  },
+  {
+    "case_id": 2,
+    "question_code": "EDAD",
+    "variable_code": null,
+    "raw_code": null,
+    "numeric_value": 25.0,
+    "text_value": null,
+    "is_missing": false
+  },
+  {
+    "case_id": 3,
+    "question_code": "EDAD",
+    "variable_code": null,
+    "raw_code": null,
+    "numeric_value": 30.0,
+    "text_value": null,
+    "is_missing": false
+  }
+]

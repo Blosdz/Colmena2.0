@@ -1,0 +1,4 @@
+case_id,question_code,variable_code,raw_code,numeric_value,text_value,is_missing
+1,EDAD,,,20.0,,False
+2,EDAD,,,25.0,,False
+3,EDAD,,,30.0,,False

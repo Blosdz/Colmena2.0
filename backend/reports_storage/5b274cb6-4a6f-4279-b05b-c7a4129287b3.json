@@ -1,0 +1,487 @@
+{
+  "study": {
+    "id": 1,
+    "public_id": "b5a1bf4e-a001-4745-8dae-fe7d6a1ed1a5",
+    "name": "Piloto de tesis · Muestra sintética 2026",
+    "study_type": "ACADEMIC",
+    "status": "OPEN"
+  },
+  "generated_at": "2026-08-13T21:04:51.874960+00:00",
+  "analysis_results": [
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "CA_x_CN",
+      "n_valid": 70,
+      "numeric_value": null,
+      "statistic_value": 0.5876509216196465,
+      "p_value": 8.883349806887429e-08,
+      "effect_size": 0.5876509216196465,
+      "result_data": {
+        "n": 70,
+        "rho": 0.5876509216196465,
+        "x_key": "construct:1",
+        "y_key": "construct:2",
+        "p_value": 8.883349806887429e-08,
+        "warnings": [],
+        "magnitude": "FUERTE",
+        "significant": true,
+        "adjusted_p_value": 1.3325024710331145e-07
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "CA_x_SL",
+      "n_valid": 70,
+      "numeric_value": null,
+      "statistic_value": 0.7683589537764649,
+      "p_value": 8.230777528349418e-15,
+      "effect_size": 0.7683589537764649,
+      "result_data": {
+        "n": 70,
+        "rho": 0.7683589537764649,
+        "x_key": "construct:1",
+        "y_key": "construct:3",
+        "p_value": 8.230777528349418e-15,
+        "warnings": [],
+        "magnitude": "FUERTE",
+        "significant": true,
+        "adjusted_p_value": 2.4692332585048255e-14
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "CN_x_SL",
+      "n_valid": 70,
+      "numeric_value": null,
+      "statistic_value": 0.5198399447824122,
+      "p_value": 3.99074116417423e-06,
+      "effect_size": 0.5198399447824122,
+      "result_data": {
+        "n": 70,
+        "rho": 0.5198399447824122,
+        "x_key": "construct:2",
+        "y_key": "construct:3",
+        "p_value": 3.99074116417423e-06,
+        "warnings": [],
+        "magnitude": "FUERTE",
+        "significant": true,
+        "adjusted_p_value": 3.99074116417423e-06
+      }
+    },
+    {
+      "result_type": "NORMALITY",
+      "result_code": "CA",
+      "n_valid": 70,
+      "numeric_value": null,
+      "statistic_value": 0.961123339583537,
+      "p_value": 0.02888738423974748,
+      "effect_size": null,
+      "result_data": {
+        "n": 70,
+        "mean": 39.69642857142857,
+        "test": "SHAPIRO_WILK",
+        "median": 40.0,
+        "status": "NO_NORMAL",
+        "maximum": 85.0,
+        "minimum": 0.0,
+        "p_value": 0.02888738423974748,
+        "warnings": [],
+        "histogram": [
+          {
+            "n": 8,
+            "max_value": 8.5,
+            "min_value": 0.0
+          },
+          {
+            "n": 4,
+            "max_value": 17.0,
+            "min_value": 8.5
+          },
+          {
+            "n": 8,
+            "max_value": 25.5,
+            "min_value": 17.0
+          },
+          {
+            "n": 6,
+            "max_value": 34.0,
+            "min_value": 25.5
+          },
+          {
+            "n": 11,
+            "max_value": 42.5,
+            "min_value": 34.0
+          },
+          {
+            "n": 18,
+            "max_value": 51.0,
+            "min_value": 42.5
+          },
+          {
+            "n": 4,
+            "max_value": 59.5,
+            "min_value": 51.0
+          },
+          {
+            "n": 2,
+            "max_value": 68.0,
+            "min_value": 59.5
+          },
+          {
+            "n": 5,
+            "max_value": 76.5,
+            "min_value": 68.0
+          },
+          {
+            "n": 4,
+            "max_value": 85.0,
+            "min_value": 76.5
+          }
+        ],
+        "statistic": 0.961123339583537,
+        "construct_id": 1,
+        "construct_code": "CA",
+        "construct_name": "Compromiso afectivo",
+        "standard_deviation": 22.397548263581477
+      }
+    },
+    {
+      "result_type": "NORMALITY",
+      "result_code": "CN",
+      "n_valid": 70,
+      "numeric_value": null,
+      "statistic_value": 0.9745632453970007,
+      "p_value": 0.16479720268012144,
+      "effect_size": null,
+      "result_data": {
+        "n": 70,
+        "mean": 46.410714285714285,
+        "test": "SHAPIRO_WILK",
+        "median": 50.0,
+        "status": "COMPATIBLE_CON_NORMALIDAD",
+        "maximum": 100.0,
+        "minimum": 5.0,
+        "p_value": 0.16479720268012144,
+        "warnings": [],
+        "histogram": [
+          {
+            "n": 3,
+            "max_value": 14.5,
+            "min_value": 5.0
+          },
+          {
+            "n": 4,
+            "max_value": 24.0,
+            "min_value": 14.5
+          },
+          {
+            "n": 11,
+            "max_value": 33.5,
+            "min_value": 24.0
+          },
+          {
+            "n": 7,
+            "max_value": 43.0,
+            "min_value": 33.5
+          },
+          {
+            "n": 21,
+            "max_value": 52.5,
+            "min_value": 43.0
+          },
+          {
+            "n": 9,
+            "max_value": 62.0,
+            "min_value": 52.5
+          },
+          {
+            "n": 10,
+            "max_value": 71.5,
+            "min_value": 62.0
+          },
+          {
+            "n": 4,
+            "max_value": 81.0,
+            "min_value": 71.5
+          },
+          {
+            "n": 0,
+            "max_value": 90.5,
+            "min_value": 81.0
+          },
+          {
+            "n": 1,
+            "max_value": 100.0,
+            "min_value": 90.5
+          }
+        ],
+        "statistic": 0.9745632453970007,
+        "construct_id": 2,
+        "construct_code": "CN",
+        "construct_name": "Compromiso normativo",
+        "standard_deviation": 18.70819182901937
+      }
+    },
+    {
+      "result_type": "NORMALITY",
+      "result_code": "SL",
+      "n_valid": 70,
+      "numeric_value": null,
+      "statistic_value": 0.9631789199809407,
+      "p_value": 0.03759776715955447,
+      "effect_size": null,
+      "result_data": {
+        "n": 70,
+        "mean": 42.214285714285715,
+        "test": "SHAPIRO_WILK",
+        "median": 40.0,
+        "status": "NO_NORMAL",
+        "maximum": 90.0,
+        "minimum": 5.0,
+        "p_value": 0.03759776715955447,
+        "warnings": [],
+        "histogram": [
+          {
+            "n": 2,
+            "max_value": 13.5,
+            "min_value": 5.0
+          },
+          {
+            "n": 7,
+            "max_value": 22.0,
+            "min_value": 13.5
+          },
+          {
+            "n": 20,
+            "max_value": 30.5,
+            "min_value": 22.0
+          },
+          {
+            "n": 4,
+            "max_value": 39.0,
+            "min_value": 30.5
+          },
+          {
+            "n": 7,
+            "max_value": 47.5,
+            "min_value": 39.0
+          },
+          {
+            "n": 14,
+            "max_value": 56.0,
+            "min_value": 47.5
+          },
+          {
+            "n": 6,
+            "max_value": 64.5,
+            "min_value": 56.0
+          },
+          {
+            "n": 4,
+            "max_value": 73.0,
+            "min_value": 64.5
+          },
+          {
+            "n": 4,
+            "max_value": 81.5,
+            "min_value": 73.0
+          },
+          {
+            "n": 2,
+            "max_value": 90.0,
+            "min_value": 81.5
+          }
+        ],
+        "statistic": 0.9631789199809407,
+        "construct_id": 3,
+        "construct_code": "SL",
+        "construct_name": "Satisfacción laboral",
+        "standard_deviation": 19.429325927683152
+      }
+    }
+  ],
+  "censopas_results": [
+    {
+      "construct_id": 1,
+      "construct_code": "CA",
+      "construct_name": "Compromiso afectivo",
+      "n_valid": 70,
+      "suppressed": false,
+      "classification_status": "BAREMED",
+      "favorable_n": 28,
+      "intermediate_n": 22,
+      "unfavorable_n": 20,
+      "favorable_pct": 40.0,
+      "intermediate_pct": 31.4286,
+      "unfavorable_pct": 28.5714,
+      "construct_score": 39.69642857142857,
+      "collective_classification": "FAVORABLE"
+    },
+    {
+      "construct_id": 2,
+      "construct_code": "CN",
+      "construct_name": "Compromiso normativo",
+      "n_valid": 70,
+      "suppressed": false,
+      "classification_status": "BAREMED",
+      "favorable_n": 24,
+      "intermediate_n": 23,
+      "unfavorable_n": 23,
+      "favorable_pct": 34.2857,
+      "intermediate_pct": 32.8571,
+      "unfavorable_pct": 32.8571,
+      "construct_score": 46.410714285714285,
+      "collective_classification": "FAVORABLE"
+    },
+    {
+      "construct_id": 3,
+      "construct_code": "SL",
+      "construct_name": "Satisfacción laboral",
+      "n_valid": 70,
+      "suppressed": false,
+      "classification_status": "BAREMED",
+      "favorable_n": 30,
+      "intermediate_n": 20,
+      "unfavorable_n": 20,
+      "favorable_pct": 42.8571,
+      "intermediate_pct": 28.5714,
+      "unfavorable_pct": 28.5714,
+      "construct_score": 42.214285714285715,
+      "collective_classification": "FAVORABLE"
+    }
+  ],
+  "barem_results": {
+    "study_id": 1,
+    "study_name": "Piloto de tesis · Muestra sintética 2026",
+    "study_type": "ACADEMIC",
+    "analysis_run_id": 2,
+    "algorithm_version": "likert-baremos-v1",
+    "instrument_version_id": 8,
+    "barem_id": 1,
+    "barem_name": "Baremo piloto (terciles muestrales)",
+    "n_completed": 70,
+    "min_publishable_n": 5,
+    "results": [
+      {
+        "construct_id": 2,
+        "construct_code": "CN",
+        "construct_name": "Compromiso normativo",
+        "construct_type": "DIMENSION",
+        "n_valid": 70,
+        "suppressed": false,
+        "mean_score": 46.4107,
+        "median_score": 50.0,
+        "priority_rank": 1,
+        "bands": [
+          {
+            "band_id": 4,
+            "code": "NIVEL_1",
+            "label": "Bajo",
+            "color_hint": "#ef4444",
+            "n": 23,
+            "pct": 32.8571,
+            "suppressed": false
+          },
+          {
+            "band_id": 5,
+            "code": "NIVEL_2",
+            "label": "Medio",
+            "color_hint": "#f59e0b",
+            "n": 23,
+            "pct": 32.8571,
+            "suppressed": false
+          },
+          {
+            "band_id": 6,
+            "code": "NIVEL_3",
+            "label": "Alto",
+            "color_hint": "#22c55e",
+            "n": 24,
+            "pct": 34.2857,
+            "suppressed": false
+          }
+        ]
+      },
+      {
+        "construct_id": 1,
+        "construct_code": "CA",
+        "construct_name": "Compromiso afectivo",
+        "construct_type": "DIMENSION",
+        "n_valid": 70,
+        "suppressed": false,
+        "mean_score": 39.6964,
+        "median_score": 40.0,
+        "priority_rank": 2,
+        "bands": [
+          {
+            "band_id": 1,
+            "code": "NIVEL_1",
+            "label": "Bajo",
+            "color_hint": "#ef4444",
+            "n": 20,
+            "pct": 28.5714,
+            "suppressed": false
+          },
+          {
+            "band_id": 2,
+            "code": "NIVEL_2",
+            "label": "Medio",
+            "color_hint": "#f59e0b",
+            "n": 22,
+            "pct": 31.4286,
+            "suppressed": false
+          },
+          {
+            "band_id": 3,
+            "code": "NIVEL_3",
+            "label": "Alto",
+            "color_hint": "#22c55e",
+            "n": 28,
+            "pct": 40.0,
+            "suppressed": false
+          }
+        ]
+      },
+      {
+        "construct_id": 3,
+        "construct_code": "SL",
+        "construct_name": "Satisfacción laboral",
+        "construct_type": "DIMENSION",
+        "n_valid": 70,
+        "suppressed": false,
+        "mean_score": 42.2143,
+        "median_score": 40.0,
+        "priority_rank": 3,
+        "bands": [
+          {
+            "band_id": 7,
+            "code": "NIVEL_1",
+            "label": "Bajo",
+            "color_hint": "#ef4444",
+            "n": 20,
+            "pct": 28.5714,
+            "suppressed": false
+          },
+          {
+            "band_id": 8,
+            "code": "NIVEL_2",
+            "label": "Medio",
+            "color_hint": "#f59e0b",
+            "n": 20,
+            "pct": 28.5714,
+            "suppressed": false
+          },
+          {
+            "band_id": 9,
+            "code": "NIVEL_3",
+            "label": "Alto",
+            "color_hint": "#22c55e",
+            "n": 30,
+            "pct": 42.8571,
+            "suppressed": false
+          }
+        ]
+      }
+    ]
+  }
+}

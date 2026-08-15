@@ -1,0 +1,29 @@
+[
+  {
+    "respondent_public_id": "2d7a0043-3325-436b-bd5e-64409e24249f",
+    "question_code": "EDAD",
+    "variable_code": null,
+    "raw_code": null,
+    "numeric_value": 20.0,
+    "text_value": null,
+    "is_missing": false
+  },
+  {
+    "respondent_public_id": "9141bdcf-0f22-495f-8b3c-7cac3d94a05b",
+    "question_code": "EDAD",
+    "variable_code": null,
+    "raw_code": null,
+    "numeric_value": 25.0,
+    "text_value": null,
+    "is_missing": false
+  },
+  {
+    "respondent_public_id": "39ae85e6-e30f-4cb8-8c6e-2d0f75c3056a",
+    "question_code": "EDAD",
+    "variable_code": null,
+    "raw_code": null,
+    "numeric_value": 30.0,
+    "text_value": null,
+    "is_missing": false
+  }
+]

@@ -1,0 +1,137 @@
+{
+  "study": {
+    "id": 1,
+    "public_id": "3b24601d-b123-4b88-8379-8594dd8d878b",
+    "name": "Estudio BSC",
+    "study_type": "ACADEMIC",
+    "status": "OPEN"
+  },
+  "generated_at": "2026-08-14T21:59:09.632444+00:00",
+  "report_mode": "PROVISIONAL",
+  "sections": [],
+  "methodological_status": {
+    "instrument_version_id": 1,
+    "version_kind": "UNKNOWN",
+    "ready_for_scoring": false,
+    "ready_for_official_reporting": false,
+    "expected": {},
+    "actual": {
+      "questions": 1,
+      "scored": 0,
+      "descriptive": 1,
+      "dimensions": 0,
+      "subdimensions": 0,
+      "scoring_rules": 0,
+      "linked_scored": 0
+    },
+    "errors": [
+      "UNSUPPORTED_CENSOPAS_VERSION"
+    ],
+    "warnings": [
+      "OFFICIAL_BAREM_NOT_AVAILABLE",
+      "OFFICIAL_EQUIVALENCE_DISABLED"
+    ]
+  },
+  "analysis_results": [
+    {
+      "result_type": "DESCRIPTIVE",
+      "result_code": "p1",
+      "n_valid": 5,
+      "numeric_value": 3.0,
+      "statistic_value": null,
+      "p_value": null,
+      "adjusted_p_value": null,
+      "effect_size": null,
+      "effect_label": null,
+      "ci_lower": null,
+      "ci_upper": null,
+      "text_value": null,
+      "result_data": {
+        "n_valid": 5,
+        "mean": 3.0,
+        "median": 3.0,
+        "mode": 1.0,
+        "std": 1.5811388300841898,
+        "variance": 2.5,
+        "min": 1.0,
+        "max": 5.0,
+        "quartiles": [
+          2.0,
+          3.0,
+          4.0
+        ]
+      }
+    }
+  ],
+  "censopas_results": [],
+  "barem_results": {
+    "study_id": 1,
+    "study_name": "Estudio BSC",
+    "study_type": "ACADEMIC",
+    "instrument_id": 1,
+    "instrument_name": "Escala propia",
+    "instrument_version_code": "V1",
+    "analysis_run_id": null,
+    "algorithm_version": null,
+    "instrument_version_id": 1,
+    "barem_id": null,
+    "barem_name": null,
+    "n_completed": 5,
+    "min_publishable_n": 5,
+    "results": []
+  },
+  "action_plans": [],
+  "premium_analytics": {
+    "status": "NO_RESULTS",
+    "methods": [],
+    "result_count": 0,
+    "significant_result_count": 0,
+    "privacy": {
+      "minimum_n": 5,
+      "individual_assignments_removed": true,
+      "small_group_results_removed": true
+    },
+    "limitations": [
+      "Los resultados premium complementan y no modifican el semáforo CENSOPAS.",
+      "Las asociaciones no demuestran causalidad.",
+      "K-means es exploratorio y no publica asignaciones individuales.",
+      "La regresión no debe utilizarse para decisiones laborales individuales."
+    ],
+    "results": []
+  },
+  "traceability": {
+    "lineage": [
+      "responses.raw_code",
+      "response_scores.risk_value",
+      "response_scores.score_0_100",
+      "construct_scores.score_0_100",
+      "construct_results",
+      "report_run"
+    ],
+    "instrument_version_id": 1,
+    "version_kind": "UNKNOWN",
+    "manifest_hash": null,
+    "barem": null,
+    "analysis_runs": [
+      {
+        "analysis_type": "DESCRIPTIVE",
+        "status": "COMPLETED",
+        "engine": "PYTHON",
+        "engine_version": null,
+        "algorithm_version": null,
+        "input_hash": null,
+        "completed_at": "2026-08-14T21:59:09.620213"
+      }
+    ],
+    "privacy": {
+      "min_publishable_n": 5,
+      "individual_records_included": false,
+      "secondary_suppression": true
+    },
+    "report": {
+      "mode": "PROVISIONAL",
+      "sections": [],
+      "generated_at": "2026-08-14T21:59:09.632444+00:00"
+    }
+  }
+}

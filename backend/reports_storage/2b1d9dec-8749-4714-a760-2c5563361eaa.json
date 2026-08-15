@@ -1,0 +1,116 @@
+{
+  "study": {
+    "id": 1,
+    "public_id": "fb87df23-a6af-4bca-909e-3659e54ddcdc",
+    "name": "Estudio spearman",
+    "study_type": "ACADEMIC",
+    "status": "OPEN"
+  },
+  "generated_at": "2026-08-13T16:58:33.159892+00:00",
+  "analysis_results": [
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "D1_x_x1",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 0.9856107606,
+      "p_value": 0.0003090857,
+      "effect_size": 0.9856107606,
+      "result_data": {
+        "x_key": "construct:1",
+        "y_key": "variable:1",
+        "rho": 0.9856107606091624,
+        "p_value": 0.0003090856678496653,
+        "adjusted_p_value": 0.0003090856678496653,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "D1_x_x2",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 0.9856107606,
+      "p_value": 0.0003090857,
+      "effect_size": 0.9856107606,
+      "result_data": {
+        "x_key": "construct:1",
+        "y_key": "variable:2",
+        "rho": 0.9856107606091624,
+        "p_value": 0.0003090856678496653,
+        "adjusted_p_value": 0.0003090856678496653,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    },
+    {
+      "result_type": "SPEARMAN",
+      "result_code": "x1_x_x2",
+      "n_valid": 6,
+      "numeric_value": null,
+      "statistic_value": 1.0,
+      "p_value": 0.0,
+      "effect_size": 1.0,
+      "result_data": {
+        "x_key": "variable:1",
+        "y_key": "variable:2",
+        "rho": 1.0,
+        "p_value": 0.0,
+        "adjusted_p_value": 0.0,
+        "n": 6,
+        "magnitude": "FUERTE",
+        "significant": true,
+        "warnings": []
+      }
+    }
+  ],
+  "censopas_results": [
+    {
+      "construct_id": 1,
+      "construct_code": "D1",
+      "construct_name": "Dimensión",
+      "n_valid": 6,
+      "suppressed": false,
+      "classification_status": "UNCLASSIFIED",
+      "favorable_n": 0,
+      "intermediate_n": 0,
+      "unfavorable_n": 0,
+      "favorable_pct": 0.0,
+      "intermediate_pct": 0.0,
+      "unfavorable_pct": 0.0,
+      "construct_score": 50.0,
+      "collective_classification": null
+    }
+  ],
+  "barem_results": {
+    "study_id": 1,
+    "study_name": "Estudio spearman",
+    "study_type": "ACADEMIC",
+    "analysis_run_id": 1,
+    "algorithm_version": "likert-baremos-v1",
+    "instrument_version_id": 1,
+    "barem_id": null,
+    "barem_name": null,
+    "n_completed": 6,
+    "min_publishable_n": 5,
+    "results": [
+      {
+        "construct_id": 1,
+        "construct_code": "D1",
+        "construct_name": "Dimensión",
+        "construct_type": "DIMENSION",
+        "n_valid": 6,
+        "suppressed": false,
+        "mean_score": 50.0,
+        "median_score": 50.0,
+        "priority_rank": 1,
+        "bands": []
+      }
+    ]
+  }
+}

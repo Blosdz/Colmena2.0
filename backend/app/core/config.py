@@ -1,0 +1,37 @@
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    environment: str = "development"
+    log_level: str = "INFO"
+
+    database_url: str = "postgresql+asyncpg://colmena:colmena@localhost:5432/colmena"
+    database_url_sync: str = "postgresql+psycopg://colmena:colmena@localhost:5432/colmena"
+
+    api_v1_prefix: str = "/api/v1"
+
+    default_page_size: int = 25
+    max_page_size: int = 200
+
+    export_storage_dir: str = "./exports_storage"
+
+    jwt_secret_key: str = "dev-only-insecure-secret-change-me-in-production-please-1234567890"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 7
+
+    cors_origins: list[str] = ["http://localhost:5174", "http://127.0.0.1:5174"]
+
+    # E-17: protección anti-abuso mínima del formulario público (sin Redis —
+    # limitación conocida en despliegues multi-worker, documentada en
+    # app/core/rate_limit.py).
+    public_session_rate_limit_max: int = 10
+    public_session_rate_limit_window_seconds: int = 60
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

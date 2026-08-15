@@ -1,0 +1,4 @@
+respondent_public_id,question_code,variable_code,raw_code,numeric_value,text_value,is_missing
+f90c5950-0a14-4cd4-862c-b47e1641575e,EDAD,,,20.0,,False
+a4117af0-66b2-4575-ab52-fce276d00b61,EDAD,,,25.0,,False
+df5f1dfc-252a-44f5-940a-196d229d388a,EDAD,,,30.0,,False

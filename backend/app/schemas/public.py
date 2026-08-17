@@ -24,7 +24,8 @@ class PublicQuestion(BaseModel):
     question_text: str
     short_label: str | None
     question_type: str
-    question_role: str
+    is_scored: bool
+    research_role: str | None
     is_required: bool | None
     validation_rules: dict = Field(default_factory=dict)
     options: list[PublicOption] = Field(default_factory=list)

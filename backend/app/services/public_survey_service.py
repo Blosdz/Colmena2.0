@@ -106,7 +106,8 @@ class PublicSurveyService:
                 question_text=link.display_text_override or link.question.question_text,
                 short_label=link.question.short_label,
                 question_type=link.question.question_type,
-                question_role=link.question.question_role,
+                is_scored=link.question.is_scored,
+                research_role=link.question.research_role,
                 is_required=(
                     link.is_required
                     if link.is_required is not None

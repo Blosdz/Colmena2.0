@@ -16,14 +16,21 @@ QUESTION_TYPES = (
     "MATRIX",
     "RANKING",
 )
-QUESTION_ROLES = ("SCORED", "EXOGENOUS", "DESCRIPTIVE")
+# Rol de investigación (opcional): distinto del tipo de pregunta y de si el
+# ítem participa en un scoring (`is_scored`). Muchas preguntas de un survey
+# tipo CENSOPAS (edad, sexo, remuneración) no pertenecen a ninguna variable
+# de investigación — por eso este campo es nullable y sin default forzado.
+RESEARCH_ROLES = ("EXOGENOUS", "ENDOGENOUS", "MEDIATOR", "MODERATOR", "CONTROL")
 
 
 class Question(Base, PublicIdMixin, TimestampMixin):
     __tablename__ = "questions"
     __table_args__ = (
         CheckConstraint(f"question_type IN {QUESTION_TYPES}", name="ck_questions_question_type"),
-        CheckConstraint(f"question_role IN {QUESTION_ROLES}", name="ck_questions_question_role"),
+        CheckConstraint(
+            f"research_role IS NULL OR research_role IN {RESEARCH_ROLES}",
+            name="ck_questions_research_role",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigIntPK, primary_key=True)
@@ -37,7 +44,7 @@ class Question(Base, PublicIdMixin, TimestampMixin):
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
     short_label: Mapped[str | None] = mapped_column(String(255))
     question_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    question_role: Mapped[str] = mapped_column(String(30), nullable=False, default="DESCRIPTIVE")
+    research_role: Mapped[str | None] = mapped_column(String(30))
     category: Mapped[str | None] = mapped_column(String(100))
     is_scored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_required_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

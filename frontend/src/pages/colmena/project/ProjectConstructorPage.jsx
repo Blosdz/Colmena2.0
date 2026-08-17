@@ -212,7 +212,7 @@ function InstrumentTab({ projectId, versionId, isLoadingInstrument, onCreateInst
         question_text: questionPayload.question_text,
         short_label: questionPayload.short_label,
         question_type: questionPayload.question_type,
-        question_role: questionPayload.question_role,
+        is_scored: questionPayload.is_scored,
         option_set_id: questionPayload.option_set_id,
         is_required_default: questionPayload.is_required_default,
         metadata: questionPayload.metadata,

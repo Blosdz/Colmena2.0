@@ -23,6 +23,8 @@ import StudySelector from '../../../components/colmena/StudySelector.jsx';
 import { SpearmanMatrix } from '../../../components/colmena/results/SpearmanPanel.jsx';
 import { formatNumber, formatPercent } from '../../../utils/format.js';
 import { semanticBand, semanticBandColor, semanticBandOrder } from '../../../utils/chartColors.js';
+import { dominantBand, unfavorablePct } from '../../../utils/scoringResults.js';
+import PriorityBarChart from '../../../components/colmena/results/PriorityBarChart.jsx';
 
 const K_OPTIONS = [2, 3, 4];
 
@@ -31,15 +33,6 @@ function formatDuration(seconds) {
   const rounded = Math.round(seconds);
   if (rounded < 60) return `${rounded}s`;
   return `${Math.floor(rounded / 60)}m ${rounded % 60}s`;
-}
-
-function dominantBand(result) {
-  if (!result?.bands?.length) return null;
-  return result.bands.reduce((best, band) => ((band.pct || 0) > (best.pct || 0) ? band : best), result.bands[0]);
-}
-
-function unfavorablePct(result) {
-  return result.bands?.find((band) => semanticBand(band.label) === 'unfavorable')?.pct || 0;
 }
 
 function DimensionDistributionRow({ result }) {
@@ -303,18 +296,22 @@ export default function ProjectPremiumDashboardPage() {
   const selectedTelemetry = (telemetry?.studies || []).find((study) => study.study_id === studyId);
   const results = overview?.results || [];
   const dimensions = results.filter((result) => result.construct_type === 'DIMENSION' && !result.suppressed);
+  const subdimensions = results.filter((result) => result.construct_type === 'SUBDIMENSION' && !result.suppressed);
   const rankableVariables = (variablesData?.items || []).filter((variable) =>
     ['ORDINAL', 'SCALE'].includes(variable.measurement_level),
   );
 
-  const priorityDimensions = dimensions.filter((result) => semanticBand(dominantBand(result)?.label) === 'unfavorable');
-  const worstGap = [...dimensions].sort((a, b) => unfavorablePct(b) - unfavorablePct(a))[0];
-  const priorityRows = [...dimensions].sort((a, b) => {
+  const byPriority = (a, b) => {
     const rankA = a.priority_rank ?? Infinity;
     const rankB = b.priority_rank ?? Infinity;
     if (rankA !== rankB) return rankA - rankB;
     return unfavorablePct(b) - unfavorablePct(a);
-  });
+  };
+
+  const priorityDimensions = dimensions.filter((result) => semanticBand(dominantBand(result)?.label) === 'unfavorable');
+  const worstGap = [...dimensions].sort((a, b) => unfavorablePct(b) - unfavorablePct(a))[0];
+  const priorityRows = [...dimensions].sort(byPriority);
+  const subdimensionRows = [...subdimensions].sort(byPriority);
 
   const coveragePct = selectedTelemetry?.started_count
     ? Math.round((selectedTelemetry.valid_count / selectedTelemetry.started_count) * 100)
@@ -399,14 +396,31 @@ export default function ProjectPremiumDashboardPage() {
           </div>
 
           <Card>
-            <p className="text-sm font-semibold text-dark">Priorización</p>
+            <p className="text-sm font-semibold text-dark">Priorización por dimensión</p>
             <p className="mb-3 mt-1 text-xs text-muted">
               Ordenado por prioridad calculada por el backend (o por % desfavorable si aún no hay baremo). No reemplaza el juicio técnico del equipo responsable.
             </p>
-            {priorityRows.length ? <PriorityTable rows={priorityRows} /> : (
+            {priorityRows.length ? (
+              <>
+                <PriorityBarChart rows={priorityRows} />
+                <div className="mt-4">
+                  <PriorityTable rows={priorityRows} />
+                </div>
+              </>
+            ) : (
               <EmptyState title="Sin dimensiones publicables" description="Calcula el scoring para ver la priorización." />
             )}
           </Card>
+
+          {subdimensionRows.length ? (
+            <Card>
+              <p className="text-sm font-semibold text-dark">Priorización por subdimensión</p>
+              <p className="mb-3 mt-1 text-xs text-muted">
+                Vista compacta de todas las subdimensiones a la vez, en vez de un gráfico por cada una.
+              </p>
+              <PriorityBarChart rows={subdimensionRows} />
+            </Card>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <SpearmanCard studyId={studyId} />

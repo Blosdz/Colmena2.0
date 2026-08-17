@@ -13,6 +13,7 @@ async def _setup_censopas_study(
     create_scoring_rules: bool = True,
     create_sessions: bool = True,
     with_units: bool = False,
+    unit_specs: list[dict] | None = None,
 ):
     instrument = (
         await client.post(
@@ -111,23 +112,31 @@ async def _setup_censopas_study(
     ).json()
     await client.patch(f"/api/v1/studies/{study['id']}", json={"barem_id": barem["id"]})
     units = []
-    if with_units:
+    if with_units or unit_specs:
         unit_type = (
             await client.post(
                 f"/api/v1/studies/{study['id']}/unit-types",
                 json={"code": "CENTRO", "name": "Centro laboral"},
             )
         ).json()
-        for code in ("A", "B"):
-            units.append(
-                (
-                    await client.post(
-                        f"/api/v1/study-unit-types/{unit_type['id']}/units",
-                        json={"code": code, "name": f"Centro {code}"},
-                    )
-                ).json()
-            )
+        units_by_code: dict[str, dict] = {}
+        specs = unit_specs or [
+            {"code": "A", "name": "Centro A"},
+            {"code": "B", "name": "Centro B"},
+        ]
+        for spec in specs:
+            payload = {"code": spec["code"], "name": spec["name"]}
+            if spec.get("parent_code"):
+                payload["parent_id"] = units_by_code[spec["parent_code"]]["id"]
+            unit = (
+                await client.post(
+                    f"/api/v1/study-unit-types/{unit_type['id']}/units", json=payload
+                )
+            ).json()
+            units.append(unit)
+            units_by_code[spec["code"]] = unit
         study["_test_unit_type_id"] = unit_type["id"]
+        study["_test_units_by_code"] = units_by_code
     await client.post(f"/api/v1/studies/{study['id']}/open")
 
     # 3 respondentes: dos con exigencia alta (riesgo), uno bajo.
@@ -205,6 +214,78 @@ async def test_censopas_unit_results_apply_secondary_suppression(
         "BELOW_MINIMUM_N",
         "SECONDARY_DEDUCTION_PROTECTION",
     }
+
+
+async def test_censopas_unit_results_group_small_units_under_publishable_parent(
+    client: AsyncClient, seed_user, seed_project
+) -> None:
+    """Contabilidad (3) y Tesorería (4) no alcanzan min_publishable_n=5 por
+    separado, pero agrupadas bajo "Administración financiera" (parent_id)
+    suman 7 y sí son publicables — sin exponer las celdas individuales."""
+    study, _dimension = await _setup_censopas_study(
+        client,
+        seed_user,
+        seed_project,
+        min_publishable_n=5,
+        create_sessions=False,
+        unit_specs=[
+            {"code": "ADMIN_FIN", "name": "Administración financiera"},
+            {"code": "CONTABILIDAD", "name": "Contabilidad", "parent_code": "ADMIN_FIN"},
+            {"code": "TESORERIA", "name": "Tesorería", "parent_code": "ADMIN_FIN"},
+        ],
+    )
+    unit_type_id = study["_test_unit_type_id"]
+    units_by_code = study["_test_units_by_code"]
+    parent = units_by_code["ADMIN_FIN"]
+    contabilidad = units_by_code["CONTABILIDAD"]
+    tesoreria = units_by_code["TESORERIA"]
+
+    items_by_code = {
+        item["code"]: item
+        for item in (
+            await client.get(f"/api/v1/instrument-versions/{study['instrument_version_id']}/items")
+        ).json()
+    }
+    item1 = items_by_code["P1"]
+    item2 = items_by_code["P2"]
+
+    session_units = [contabilidad["id"]] * 3 + [tesoreria["id"]] * 4
+    for unit_id in session_units:
+        rs = (await client.post(f"/api/v1/studies/{study['id']}/response-sessions")).json()
+        await client.put(
+            f"/api/v1/response-sessions/{rs['id']}/units",
+            json={"unit_ids": [unit_id]},
+        )
+        await client.put(
+            f"/api/v1/response-sessions/{rs['id']}/responses/{item1['id']}",
+            json={"raw_code": "5"},
+        )
+        await client.put(
+            f"/api/v1/response-sessions/{rs['id']}/responses/{item2['id']}",
+            json={"raw_code": "1"},
+        )
+        await client.post(f"/api/v1/response-sessions/{rs['id']}/complete")
+
+    scoring_resp = await client.post(f"/api/v1/studies/{study['id']}/censopas/scoring")
+    assert scoring_resp.status_code == 200, scoring_resp.text
+
+    response = await client.get(
+        f"/api/v1/studies/{study['id']}/censopas/unit-results",
+        params={"unit_type_id": unit_type_id},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    unit_ids_in_response = {result["unit_id"] for result in body["results"]}
+    assert contabilidad["id"] not in unit_ids_in_response
+    assert tesoreria["id"] not in unit_ids_in_response
+    assert parent["id"] in unit_ids_in_response
+
+    parent_result = next(r for r in body["results"] if r["unit_id"] == parent["id"])
+    assert parent_result["n_valid"] == 7
+    assert parent_result["suppressed"] is False
+    assert parent_result["suppression_reason"] is None
+    assert set(parent_result["grouped_units"]) == {"Contabilidad", "Tesorería"}
 
 
 async def test_censopas_results_suppressed_below_min_publishable_n(

@@ -109,7 +109,8 @@ class InstrumentTreeItem(BaseModel):
     question_text: str
     short_label: str | None
     question_type: str
-    question_role: str
+    is_scored: bool
+    research_role: str | None
     option_set_id: int | None
     weight: float
     scoring_direction: str | None
@@ -147,7 +148,8 @@ class ConstructMatrixRow(BaseModel):
     item_code: str | None
     question_text: str
     question_type: str
-    question_role: str
+    is_scored: bool
+    research_role: str | None
     variable_code: str | None
     construct_id: int
     construct_code: str

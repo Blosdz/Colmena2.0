@@ -216,7 +216,7 @@ class StudyService:
 
         for link in survey.survey_questions:
             question = link.question
-            if question.question_role != "SCORED":
+            if not question.is_scored:
                 continue
             if question.question_type != "LIKERT" or question.option_set is None:
                 raise ValidationDomainError(
@@ -252,7 +252,8 @@ class StudyService:
                         "code": link.question.code,
                         "text": link.display_text_override or link.question.question_text,
                         "question_type": link.question.question_type,
-                        "question_role": link.question.question_role,
+                        "is_scored": link.question.is_scored,
+                        "research_role": link.question.research_role,
                         "section_id": link.section_id,
                         "sort_order": link.sort_order,
                         "is_required": (

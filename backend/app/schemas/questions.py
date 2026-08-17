@@ -20,7 +20,7 @@ QuestionType = Literal[
     "MATRIX",
     "RANKING",
 ]
-QuestionRole = Literal["SCORED", "EXOGENOUS", "DESCRIPTIVE"]
+ResearchRole = Literal["EXOGENOUS", "ENDOGENOUS", "MEDIATOR", "MODERATOR", "CONTROL"]
 
 
 class OptionSetOptionInput(BaseModel):
@@ -72,7 +72,7 @@ class QuestionCreate(BaseModel):
     question_text: str = Field(min_length=1)
     short_label: str | None = None
     question_type: QuestionType
-    question_role: QuestionRole | None = None
+    research_role: ResearchRole | None = None
     category: str | None = None
     option_set_id: int | None = None
     option_set: OptionSetCreate | None = None
@@ -89,7 +89,7 @@ class QuestionUpdate(BaseModel):
     question_text: str | None = None
     short_label: str | None = None
     question_type: QuestionType | None = None
-    question_role: QuestionRole | None = None
+    research_role: ResearchRole | None = None
     category: str | None = None
     option_set_id: int | None = None
     is_scored: bool | None = None
@@ -109,7 +109,7 @@ class QuestionRead(BaseModel):
     question_text: str
     short_label: str | None
     question_type: str
-    question_role: str
+    research_role: str | None
     category: str | None
     is_scored: bool
     is_required_default: bool

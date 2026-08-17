@@ -92,7 +92,7 @@ class CensopasScoringService:
             }
         )
         scored_questions = [
-            question for question in payload.questions if question.question_role == "SCORED"
+            question for question in payload.questions if question.is_scored
         ]
         actual = {
             "questions": len(payload.questions),
@@ -282,9 +282,9 @@ class CensopasScoringService:
                     source_code=question_data.source_code,
                     question_text=question_data.question_text,
                     question_type=question_data.question_type,
-                    question_role=question_data.question_role,
+                    research_role=question_data.research_role,
                     category=question_data.category,
-                    is_scored=question_data.question_role == "SCORED",
+                    is_scored=question_data.is_scored,
                     is_required_default=question_data.is_required,
                     sort_order=question_data.sort_order,
                     metadata_={
@@ -460,11 +460,7 @@ class CensopasScoringService:
             .scalars()
             .all()
         )
-        scored_questions = {
-            question.id
-            for question in questions
-            if question.question_role == "SCORED" or question.is_scored
-        }
+        scored_questions = {question.id for question in questions if question.is_scored}
         instrument_token = " ".join(
             filter(None, (version.instrument.code, version.instrument.name))
         ).upper()
@@ -776,6 +772,16 @@ class CensopasScoringService:
     async def _load_session_units(
         self, study_id: int
     ) -> dict[int, list[tuple[int, int]]]:
+        """Sesión -> unidades a las que pertenece, incluidas sus ancestras.
+
+        `StudyUnit.parent_id` permite agrupar unidades pequeñas bajo una
+        unidad organizacional mayor (p.ej. "Contabilidad"/"Tesorería" bajo
+        "Administración financiera") sin re-etiquetar las sesiones: cada
+        sesión asignada a una unidad hija también se propaga a sus
+        ancestras, de modo que la unidad agregadora reciba el conteo
+        combinado y pueda publicarse aunque las hijas por separado no
+        alcancen `min_publishable_n` (ver `get_unit_results`).
+        """
         stmt = (
             select(
                 ResponseSessionUnit.response_session_id,
@@ -802,6 +808,39 @@ class CensopasScoringService:
             mapping.setdefault(response_session_id, []).append(
                 (unit_type_id, unit_id)
             )
+
+        all_unit_ids = {unit_id for pairs in mapping.values() for _, unit_id in pairs}
+        if not all_unit_ids:
+            return mapping
+
+        info_by_unit: dict[int, tuple[int, int | None]] = {}
+        pending = set(all_unit_ids)
+        while pending:
+            units_stmt = select(
+                StudyUnit.id, StudyUnit.study_unit_type_id, StudyUnit.parent_id
+            ).where(StudyUnit.id.in_(pending))
+            rows = (await self.session.execute(units_stmt)).all()
+            pending = set()
+            for unit_id, unit_type_id, parent_id in rows:
+                info_by_unit[unit_id] = (unit_type_id, parent_id)
+                if parent_id is not None and parent_id not in info_by_unit:
+                    pending.add(parent_id)
+
+        for response_session_id, pairs in mapping.items():
+            expanded = list(pairs)
+            seen = set(pairs)
+            for _unit_type_id, unit_id in pairs:
+                _, ancestor_id = info_by_unit.get(unit_id, (None, None))
+                while ancestor_id is not None:
+                    ancestor_type_id, next_ancestor_id = info_by_unit.get(
+                        ancestor_id, (None, None)
+                    )
+                    key = (ancestor_type_id, ancestor_id)
+                    if key not in seen:
+                        expanded.append(key)
+                        seen.add(key)
+                    ancestor_id = next_ancestor_id
+            mapping[response_session_id] = expanded
         return mapping
 
     async def _load_valid_sessions(self, study_id: int) -> list[ResponseSession]:
@@ -972,29 +1011,61 @@ class CensopasScoringService:
             and result.unit_type_id == unit_type_id
             and result.unit_id is not None
         ]
-        unit_ids = {result.unit_id for result in results}
-        units = {}
-        if unit_ids:
-            stmt = select(StudyUnit).where(StudyUnit.id.in_(unit_ids))
-            units = {
-                unit.id: unit
-                for unit in (await self.session.execute(stmt)).scalars().all()
-            }
+        # Todas las unidades del tipo (no sólo las que tienen resultados): se
+        # necesitan para recorrer la cadena `parent_id` completa al buscar una
+        # unidad ancestra publicable.
+        units_stmt = select(StudyUnit).where(StudyUnit.study_unit_type_id == unit_type_id)
+        units = {
+            unit.id: unit for unit in (await self.session.execute(units_stmt)).scalars().all()
+        }
+
+        def _nearest_publishable_ancestor(
+            unit_id: int, by_unit: dict[int, ConstructResult]
+        ) -> int | None:
+            unit = units.get(unit_id)
+            ancestor_id = unit.parent_id if unit else None
+            while ancestor_id is not None:
+                ancestor_result = by_unit.get(ancestor_id)
+                if ancestor_result is not None and ancestor_result.n_valid >= study.min_publishable_n:
+                    return ancestor_id
+                ancestor_unit = units.get(ancestor_id)
+                ancestor_id = ancestor_unit.parent_id if ancestor_unit else None
+            return None
 
         secondary_ids: set[int] = set()
+        absorbed_ids: set[int] = set()
+        # (construct_id, ancestor_unit_id) -> nombres de las unidades hijas
+        # que quedaron agrupadas bajo esa ancestra publicable.
+        grouped_names: dict[tuple[int, int], list[str]] = {}
         grouped: dict[int, list[ConstructResult]] = {}
         for result in results:
             grouped.setdefault(result.construct_id, []).append(result)
-        for construct_results in grouped.values():
+        for construct_id, construct_results in grouped.items():
+            by_unit = {result.unit_id: result for result in construct_results}
+
+            # Unidades por debajo del umbral: si tienen una ancestra publicable
+            # (n agregado >= min_publishable_n), se agrupan bajo ella y dejan
+            # de mostrarse individualmente (harness §31 + agrupación manual
+            # de unidades vía `StudyUnit.parent_id`).
+            for unit_id, result in by_unit.items():
+                if result.n_valid >= study.min_publishable_n:
+                    continue
+                ancestor_id = _nearest_publishable_ancestor(unit_id, by_unit)
+                if ancestor_id is not None:
+                    absorbed_ids.add(result.id)
+                    unit = units.get(unit_id)
+                    grouped_names.setdefault((construct_id, ancestor_id), []).append(
+                        unit.name if unit else str(unit_id)
+                    )
+
+            visible_results = [
+                result for result in construct_results if result.id not in absorbed_ids
+            ]
             primary = [
-                result
-                for result in construct_results
-                if result.n_valid < study.min_publishable_n
+                result for result in visible_results if result.n_valid < study.min_publishable_n
             ]
             publishable = [
-                result
-                for result in construct_results
-                if result.n_valid >= study.min_publishable_n
+                result for result in visible_results if result.n_valid >= study.min_publishable_n
             ]
             if len(primary) == 1 and publishable:
                 secondary = min(
@@ -1005,6 +1076,8 @@ class CensopasScoringService:
 
         payload_results = []
         for result in results:
+            if result.id in absorbed_ids:
+                continue
             is_secondary = result.id in secondary_ids
             privacy = self.apply_privacy(
                 result,
@@ -1018,6 +1091,7 @@ class CensopasScoringService:
                 unit_id=unit.id,
                 unit_code=unit.code,
                 unit_name=unit.name,
+                grouped_units=grouped_names.get((result.construct_id, unit.id), []),
                 suppression_reason=(
                     "SECONDARY_DEDUCTION_PROTECTION"
                     if is_secondary

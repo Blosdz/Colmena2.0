@@ -18,12 +18,16 @@ import { LoadingState } from '../../../components/ui/LoadingState.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import StudySelector from '../../../components/colmena/StudySelector.jsx';
 import BaremResultsPanel from '../../../components/colmena/results/BaremResultsPanel.jsx';
+import EvolutionPanel from '../../../components/colmena/results/EvolutionPanel.jsx';
+import UnitResultsPanel from '../../../components/colmena/results/UnitResultsPanel.jsx';
 import NormalityPanel from '../../../components/colmena/results/NormalityPanel.jsx';
 import { SegmentationPanel, SpearmanPanel } from '../../../components/colmena/results/SpearmanPanel.jsx';
 
 const TABS = [
   { key: 'comparison', label: 'Comparar variables' },
+  { key: 'evolution', label: 'Evolución' },
   { key: 'baremos', label: 'Baremos' },
+  { key: 'units', label: 'Unidades' },
   { key: 'normality', label: 'Normalidad' },
   { key: 'spearman', label: 'Spearman' },
   { key: 'segmentation', label: 'Segmentación' },
@@ -329,7 +333,8 @@ export default function ProjectResultsPage() {
           </div>
 
           {tab === 'comparison' ? <VariableComparisonPanel projectId={Number(projectId)} /> : null}
-          {tab !== 'comparison' && !studyId ? (
+          {tab === 'evolution' ? <EvolutionPanel projectId={Number(projectId)} /> : null}
+          {tab !== 'comparison' && tab !== 'evolution' && !studyId ? (
             <div className="p-4">
               <EmptyState title="Elige una aplicación o estudio." description="Podrás consultar el dataset y ejecutar análisis sobre sus respuestas.">
                 <div className="mx-auto flex h-10 w-11 items-center justify-center rounded-2xl bg-amber/10 text-amber">
@@ -350,6 +355,7 @@ export default function ProjectResultsPage() {
           {studyId && tab === 'wide' ? <GenericTable columns={wideDataset?.columns || []} rows={wideDataset?.rows || []} /> : null}
           {studyId && tab === 'analytics' ? <AnalyticsTab projectId={projectId} studyId={studyId} /> : null}
           {studyId && tab === 'baremos' ? <BaremResultsPanel studyId={studyId} /> : null}
+          {studyId && tab === 'units' ? <UnitResultsPanel studyId={studyId} /> : null}
           {studyId && tab === 'normality' ? <NormalityPanel studyId={studyId} /> : null}
           {studyId && tab === 'spearman' ? <SpearmanPanel projectId={Number(projectId)} studyId={studyId} /> : null}
           {studyId && tab === 'segmentation' ? (

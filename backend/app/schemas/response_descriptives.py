@@ -39,7 +39,8 @@ class ResponseQuestionDescriptives(BaseModel):
     short_label: str | None = None
     category: str | None = None
     question_type: str
-    question_role: str
+    is_scored: bool
+    research_role: str | None
     measurement_level: str
     variable_id: int | None = None
     variable_code: str | None = None

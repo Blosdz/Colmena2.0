@@ -77,7 +77,7 @@ def _short_manifest_payload() -> dict:
             "source_code": f"P{index}",
             "question_text": f"Ítem psicosocial {index}",
             "question_type": "LIKERT",
-            "question_role": "SCORED",
+            "is_scored": True,
             "option_set_code": "FREQ_1_5",
             "sort_order": index,
         }
@@ -89,7 +89,7 @@ def _short_manifest_payload() -> dict:
             "source_code": f"X{index}",
             "question_text": f"Variable descriptiva {index}",
             "question_type": "TEXT",
-            "question_role": "DESCRIPTIVE",
+            "is_scored": False,
             "sort_order": 31 + index,
         }
         for index in range(1, 12)

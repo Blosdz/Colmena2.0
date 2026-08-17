@@ -112,7 +112,7 @@ class ScoringService:
         cls, response: Response, link: ConstructItem, rule: ScoringRule | None
     ) -> tuple[float, float] | None:
         question = link.question
-        if question.question_role != "SCORED" or question.question_type != "LIKERT":
+        if not question.is_scored or question.question_type != "LIKERT":
             return None
         if response.is_missing:
             return None

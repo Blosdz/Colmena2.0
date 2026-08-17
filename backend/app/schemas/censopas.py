@@ -192,7 +192,8 @@ class CensopasManifestQuestion(BaseModel):
     source_code: str = Field(min_length=1, max_length=100)
     question_text: str = Field(min_length=1)
     question_type: Literal["LIKERT", "SINGLE_CHOICE", "MULTIPLE_CHOICE", "NUMBER", "TEXT", "BOOLEAN", "DATE", "DATETIME"]
-    question_role: Literal["SCORED", "EXOGENOUS", "DESCRIPTIVE"]
+    is_scored: bool
+    research_role: Literal["EXOGENOUS", "ENDOGENOUS", "MEDIATOR", "MODERATOR", "CONTROL"] | None = None
     option_set_code: str | None = None
     is_required: bool = False
     sort_order: int
@@ -258,6 +259,7 @@ class CensopasUnitResultRead(ConstructResultRead):
     unit_id: int
     unit_code: str | None
     unit_name: str
+    grouped_units: list[str] = Field(default_factory=list)
     suppression_reason: str | None = None
 
 

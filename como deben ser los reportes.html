@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Colmena · Ejemplo accesible CENSOPAS-COPSOQ</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#FAFAF8;
+      --surface:#FFFFFF;
+      --border:#E6E8EB;
+      --text:#1C1F24;
+      --muted:#6B7280;
+      --amber:#F5B21A;
+      --orange:#FF6A2A;
+      --turquoise:#11B7B2;
+      --green:#2E8B57;
+      --yellow:#D99A00;
+      --red:#C64545;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+
+    .page{
+      max-width:1280px;
+      margin:0 auto;
+      padding:32px 20px 64px;
+    }
+
+    h1{margin:0 0 8px;font-size:30px}
+    h2{margin:0 0 8px;font-size:20px}
+    p{line-height:1.5}
+
+    .muted{color:var(--muted)}
+    .toolbar{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin:22px 0;
+    }
+
+    button{
+      border:1px solid var(--border);
+      background:#fff;
+      color:var(--text);
+      padding:10px 14px;
+      border-radius:10px;
+      font-weight:700;
+      cursor:pointer;
+    }
+
+    button.primary{
+      border-color:var(--amber);
+      background:var(--amber);
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:20px;
+    }
+
+    .card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:18px;
+      padding:20px;
+      box-shadow:0 4px 18px rgba(28,31,36,.04);
+    }
+
+    .chart-wrap{
+      height:430px;
+      margin-top:12px;
+    }
+
+    .chart-wrap.tall{height:760px}
+    .chart-wrap.medium{height:520px}
+
+    .meta{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin:10px 0 0;
+      font-size:13px;
+      color:var(--muted);
+    }
+
+    .pill{
+      border:1px solid var(--border);
+      border-radius:999px;
+      padding:6px 10px;
+      background:#fff;
+    }
+
+    .legend-accessible{
+      display:flex;
+      gap:18px;
+      flex-wrap:wrap;
+      margin:14px 0 4px;
+      font-size:14px;
+      font-weight:700;
+    }
+
+    .shape{
+      display:inline-flex;
+      width:19px;
+      height:19px;
+      align-items:center;
+      justify-content:center;
+      margin-right:6px;
+      color:#fff;
+      font-size:11px;
+      border:1px solid #555;
+    }
+    .shape.circle{border-radius:50%;background:var(--green)}
+    .shape.triangle{
+      width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;
+      border-bottom:18px solid var(--yellow);border-top:0;margin-right:8px;
+    }
+    .shape.square{background:var(--red)}
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:18px;
+      font-size:14px;
+    }
+    th,td{
+      border-bottom:1px solid var(--border);
+      padding:10px 8px;
+      text-align:left;
+    }
+    th{
+      background:#F5F6F7;
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.03em;
+    }
+
+    .note{
+      margin-top:14px;
+      padding:12px 14px;
+      border-left:4px solid var(--turquoise);
+      background:#F0FAF9;
+      border-radius:8px;
+      font-size:14px;
+    }
+
+    .screen-only{display:block}
+
+    @media (min-width:1000px){
+      .grid.two{grid-template-columns:1fr 1fr}
+    }
+
+    @media print{
+      body{background:#fff}
+      .page{max-width:none;padding:0}
+      .toolbar,.screen-only{display:none!important}
+      .card{
+        box-shadow:none;
+        break-inside:avoid;
+        border-color:#bbb;
+      }
+      .grid{display:block}
+      .card{margin:0 0 18px}
+      .chart-wrap{height:360px}
+      .chart-wrap.tall{height:620px}
+      .chart-wrap.medium{height:430px}
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <h1>Colmena · Reporte accesible</h1>
+  <p class="muted">
+    Ejemplo funcional con Chart.js: distribución apilada, 20 subdimensiones,
+    priorización y cambio entre mediciones.
+  </p>
+
+  <div class="toolbar screen-only">
+    <button class="primary" onclick="window.print()">Imprimir / PDF</button>
+    <button onclick="togglePrintPreview()">Vista escala de grises</button>
+  </div>
+
+  <div class="grid">
+
+    <section class="card">
+      <h2>1. Distribución por dimensión</h2>
+      <p class="muted">Barras horizontales apiladas al 100%.</p>
+
+      <div class="meta">
+        <span class="pill">N válido: 180</span>
+        <span class="pill">Versión media</span>
+        <span class="pill">Medición: agosto 2026</span>
+      </div>
+
+      <div class="legend-accessible" aria-label="Leyenda accesible">
+        <span><i class="shape circle"></i>Favorable</span>
+        <span><i class="shape triangle"></i>Intermedio</span>
+        <span><i class="shape square"></i>Desfavorable</span>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="dimensionesChart" aria-label="Distribución por dimensión" role="img"></canvas>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Dimensión</th>
+            <th>Favorable</th>
+            <th>Intermedio</th>
+            <th>Desfavorable</th>
+            <th>n</th>
+          </tr>
+        </thead>
+        <tbody id="dimensionTable"></tbody>
+      </table>
+
+      <div class="note">
+        El color no es el único código: cada segmento incluye abreviatura y porcentaje;
+        la tabla conserva los valores exactos y el denominador.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. Veinte subdimensiones</h2>
+      <p class="muted">Una sola visualización horizontal compacta, evitando 20 gráficos separados.</p>
+
+      <div class="meta">
+        <span class="pill">N válido: 180</span>
+        <span class="pill">Métrica: % desfavorable</span>
+      </div>
+
+      <div class="chart-wrap tall">
+        <canvas id="subdimensionesChart" aria-label="Ranking de veinte subdimensiones" role="img"></canvas>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. Priorización</h2>
+      <p class="muted">Orden descendente por porcentaje desfavorable y referencia visual del 50%.</p>
+
+      <div class="chart-wrap medium">
+        <canvas id="prioridadChart" aria-label="Priorización de subdimensiones" role="img"></canvas>
+      </div>
+
+      <div class="note">
+        La línea del 50% sirve como referencia de lectura colectiva; no sustituye el baremo autorizado.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>4. Cambio entre mediciones</h2>
+      <p class="muted">Serie temporal del mismo indicador, versión y baremo equivalentes.</p>
+
+      <div class="meta">
+        <span class="pill">Indicador: D1 Exigencias psicológicas</span>
+        <span class="pill">Métrica: % desfavorable</span>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="evolucionChart" aria-label="Evolución temporal de D1" role="img"></canvas>
+      </div>
+
+      <div class="note">
+        Comparar sólo mediciones equivalentes en versión, baremo, población y unidad de análisis.
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+Chart.register(ChartDataLabels);
+if (window['chartjs-plugin-annotation']) {
+  Chart.register(window['chartjs-plugin-annotation']);
+}
+
+const COLORS = {
+  favorable: '#2E8B57',
+  intermedio: '#D99A00',
+  desfavorable: '#C64545',
+  text: '#1C1F24',
+  grid: '#E6E8EB'
+};
+
+let grayscale = false;
+let charts = [];
+
+function pattern(type, gray) {
+  const c = document.createElement('canvas');
+  c.width = 12; c.height = 12;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = gray ? '#F4F4F4' : '#FFFFFF';
+  ctx.fillRect(0,0,12,12);
+  ctx.strokeStyle = gray ? '#333333' : '#555555';
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+  if (type === 'diagonal') {
+    ctx.moveTo(-2, 12); ctx.lineTo(12, -2);
+    ctx.moveTo(4, 14); ctx.lineTo(14, 4);
+  } else if (type === 'horizontal') {
+    ctx.moveTo(0, 4); ctx.lineTo(12, 4);
+    ctx.moveTo(0, 10); ctx.lineTo(12, 10);
+  } else {
+    ctx.moveTo(0,0); ctx.lineTo(12,12);
+    ctx.moveTo(12,0); ctx.lineTo(0,12);
+  }
+  ctx.stroke();
+  return ctx.createPattern(c, 'repeat');
+}
+
+function accessibleFill(kind) {
+  if (!grayscale) return COLORS[kind];
+  if (kind === 'favorable') return pattern('diagonal', true);
+  if (kind === 'intermedio') return pattern('horizontal', true);
+  return pattern('cross', true);
+}
+
+const dimensions = [
+  {id:'D1', name:'Exigencias psicológicas', fav:19, int:36, des:45, n:180},
+  {id:'D2', name:'Conflicto trabajo-familia', fav:33, int:53, des:14, n:180},
+  {id:'D3', name:'Control sobre el trabajo', fav:56, int:44, des:0, n:180},
+  {id:'D4', name:'Apoyo social y liderazgo', fav:44, int:41, des:15, n:180},
+  {id:'D5', name:'Compensaciones', fav:28, int:53, des:19, n:180},
+  {id:'D6', name:'Capital social', fav:68, int:31, des:1, n:180}
+];
+
+const subdimensions = [
+  ['S1 Exigencias cuantitativas',60.6],
+  ['S2 Ritmo de trabajo',55.6],
+  ['S17 Inseguridad sobre el empleo',48.9],
+  ['S3 Exigencias emocionales',43.9],
+  ['S4 Esconder emociones',41.7],
+  ['S18 Inseguridad de condiciones',34.4],
+  ['S11 Calidad de liderazgo',33.3],
+  ['S15 Conflicto de rol',31.7],
+  ['S16 Reconocimiento',28.3],
+  ['S13 Previsibilidad',23.3],
+  ['S5 Doble presencia',22.8],
+  ['S10 Apoyo de superiores',20.0],
+  ['S14 Claridad de rol',12.8],
+  ['S9 Apoyo de compañeros',12.2],
+  ['S12 Sentimiento de grupo',11.1],
+  ['S20 Confianza vertical',5.0],
+  ['S19 Justicia',2.2],
+  ['S6 Influencia',1.1],
+  ['S8 Sentido del trabajo',0.6],
+  ['S7 Posibilidades de desarrollo',0.0]
+];
+
+function baseOptions() {
+  return {
+    responsive:true,
+    maintainAspectRatio:false,
+    animation:false,
+    plugins:{
+      legend:{labels:{color:COLORS.text}},
+      tooltip:{
+        callbacks:{
+          label(ctx){ return `${ctx.dataset.label}: ${ctx.raw}%`; }
+        }
+      }
+    }
+  };
+}
+
+function renderDimensionTable(){
+  const tbody = document.getElementById('dimensionTable');
+  tbody.innerHTML = dimensions.map(d => `
+    <tr>
+      <td><strong>${d.id}</strong> ${d.name}</td>
+      <td>${Math.round(d.n*d.fav/100)} (${d.fav}%)</td>
+      <td>${Math.round(d.n*d.int/100)} (${d.int}%)</td>
+      <td>${Math.round(d.n*d.des/100)} (${d.des}%)</td>
+      <td>${d.n}</td>
+    </tr>
+  `).join('');
+}
+
+function createCharts(){
+  charts.forEach(c => c.destroy());
+  charts = [];
+
+  const dimChart = new Chart(document.getElementById('dimensionesChart'),{
+    type:'bar',
+    data:{
+      labels:dimensions.map(d => `${d.id} ${d.name}`),
+      datasets:[
+        {
+          label:'Favorable',
+          short:'FAV',
+          data:dimensions.map(d=>d.fav),
+          backgroundColor:accessibleFill('favorable')
+        },
+        {
+          label:'Intermedio',
+          short:'INT',
+          data:dimensions.map(d=>d.int),
+          backgroundColor:accessibleFill('intermedio')
+        },
+        {
+          label:'Desfavorable',
+          short:'DES',
+          data:dimensions.map(d=>d.des),
+          backgroundColor:accessibleFill('desfavorable')
+        }
+      ]
+    },
+    options:{
+      ...baseOptions(),
+      indexAxis:'y',
+      scales:{
+        x:{
+          stacked:true,min:0,max:100,
+          grid:{color:COLORS.grid},
+          ticks:{callback:v=>v+'%'},
+          title:{display:true,text:'Porcentaje de trabajadores'}
+        },
+        y:{stacked:true,grid:{display:false}}
+      },
+      plugins:{
+        ...baseOptions().plugins,
+        legend:{display:false},
+        datalabels:{
+          color: grayscale ? '#111' : '#fff',
+          font:{weight:'700',size:11},
+          formatter:(value,ctx)=>{
+            if(value < 8) return '';
+            return `${ctx.dataset.short} ${value}%`;
+          }
+        }
+      }
+    }
+  });
+  charts.push(dimChart);
+
+  const subChart = new Chart(document.getElementById('subdimensionesChart'),{
+    type:'bar',
+    data:{
+      labels:subdimensions.map(x=>x[0]),
+      datasets:[{
+        label:'Desfavorable',
+        data:subdimensions.map(x=>x[1]),
+        backgroundColor: grayscale ? pattern('cross',true) : subdimensions.map(x => {
+          const v=x[1];
+          return v>=50 ? COLORS.desfavorable : v>=30 ? COLORS.intermedio : COLORS.favorable;
+        })
+      }]
+    },
+    options:{
+      ...baseOptions(),
+      indexAxis:'y',
+      scales:{
+        x:{
+          min:0,max:70,
+          ticks:{callback:v=>v+'%'},
+          title:{display:true,text:'Porcentaje desfavorable'},
+          grid:{color:COLORS.grid}
+        },
+        y:{grid:{display:false}}
+      },
+      plugins:{
+        ...baseOptions().plugins,
+        legend:{display:false},
+        datalabels:{
+          anchor:'end',align:'end',offset:4,
+          color:COLORS.text,
+          formatter:v=>`${v.toFixed(1)}%`,
+          font:{weight:'700',size:10}
+        }
+      }
+    }
+  });
+  charts.push(subChart);
+
+  const priority = subdimensions.slice(0,8);
+  const priorityChart = new Chart(document.getElementById('prioridadChart'),{
+    type:'bar',
+    data:{
+      labels:priority.map(x=>x[0]),
+      datasets:[{
+        label:'% desfavorable',
+        data:priority.map(x=>x[1]),
+        backgroundColor: grayscale ? pattern('cross',true) : COLORS.desfavorable
+      }]
+    },
+    options:{
+      ...baseOptions(),
+      indexAxis:'y',
+      scales:{
+        x:{
+          min:0,max:70,
+          ticks:{callback:v=>v+'%'},
+          title:{display:true,text:'Porcentaje desfavorable'},
+          grid:{color:COLORS.grid}
+        },
+        y:{grid:{display:false}}
+      },
+      plugins:{
+        ...baseOptions().plugins,
+        legend:{display:false},
+        annotation:{
+          annotations:{
+            reference:{
+              type:'line',
+              xMin:50,xMax:50,
+              borderColor:COLORS.text,
+              borderWidth:2,
+              borderDash:[6,6],
+              label:{
+                display:true,
+                content:'Referencia 50%',
+                position:'start',
+                backgroundColor:'#fff',
+                color:COLORS.text
+              }
+            }
+          }
+        },
+        datalabels:{
+          anchor:'end',align:'end',offset:4,
+          color:COLORS.text,
+          formatter:v=>`${v.toFixed(1)}%`,
+          font:{weight:'700'}
+        }
+      }
+    }
+  });
+  charts.push(priorityChart);
+
+  const evolutionChart = new Chart(document.getElementById('evolucionChart'),{
+    type:'line',
+    data:{
+      labels:['2026-I','2027-I','2028-I'],
+      datasets:[{
+        label:'D1 % desfavorable',
+        data:[60,52,39],
+        borderColor: grayscale ? '#222' : COLORS.orange,
+        backgroundColor: grayscale ? '#222' : COLORS.orange,
+        pointRadius:6,
+        pointHoverRadius:7,
+        borderWidth:3,
+        tension:.25
+      }]
+    },
+    options:{
+      ...baseOptions(),
+      scales:{
+        y:{
+          min:0,max:100,
+          ticks:{callback:v=>v+'%'},
+          title:{display:true,text:'Porcentaje desfavorable'},
+          grid:{color:COLORS.grid}
+        },
+        x:{
+          title:{display:true,text:'Medición'},
+          grid:{display:false}
+        }
+      },
+      plugins:{
+        ...baseOptions().plugins,
+        datalabels:{
+          align:'top',
+          color:COLORS.text,
+          formatter:v=>`${v}%`,
+          font:{weight:'700'}
+        }
+      }
+    }
+  });
+  charts.push(evolutionChart);
+}
+
+function togglePrintPreview(){
+  grayscale = !grayscale;
+  createCharts();
+}
+
+window.addEventListener('beforeprint', () => {
+  grayscale = true;
+  createCharts();
+});
+
+window.addEventListener('afterprint', () => {
+  grayscale = false;
+  createCharts();
+});
+
+renderDimensionTable();
+createCharts();
+</script>
+</body>
+</html>

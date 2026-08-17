@@ -62,14 +62,13 @@ class QuestionService:
             raise ValidationDomainError("Los valores numéricos activos de la escala deben ser únicos.")
 
     async def _validate_scored_question(
-        self, question_type: str, question_role: str, option_set_id: int | None
+        self, question_type: str, is_scored: bool, option_set_id: int | None
     ) -> None:
-        if question_role != "SCORED":
+        if not is_scored:
             return
         if question_type != "LIKERT":
             raise ValidationDomainError(
-                "Los ítems puntuables deben resolverse con una escala Likert. "
-                "Use el rol EXOGENOUS para edad, sexo u otros datos de perfil."
+                "Los ítems puntuables (is_scored=true) deben resolverse con una escala Likert."
             )
         if option_set_id is None:
             raise ValidationDomainError("Un ítem Likert puntuable requiere una escala de respuestas.")
@@ -145,7 +144,7 @@ class QuestionService:
 
         option_set_id = payload.option_set_id
         if payload.option_set is not None:
-            if payload.question_role == "SCORED" or payload.question_type == "LIKERT":
+            if payload.question_type == "LIKERT":
                 self._validate_option_inputs(payload.option_set.options)
             option_set = OptionSet(
                 instrument_version_id=instrument_version_id,
@@ -196,12 +195,13 @@ class QuestionService:
             option_set = await self.repo.create_option_set(option_set)
             option_set_id = option_set.id
 
-        question_role = payload.question_role
-        if question_role is None:
-            question_role = (
-                "SCORED" if payload.is_scored or payload.question_type == "LIKERT" else "DESCRIPTIVE"
-            )
-        await self._validate_scored_question(payload.question_type, question_role, option_set_id)
+        # Compatibilidad: si el cliente no indica is_scored explícitamente,
+        # un ítem LIKERT recién creado se asume puntuable por defecto (puede
+        # desmarcarse pasando is_scored=false explícito).
+        is_scored = payload.is_scored
+        if "is_scored" not in payload.model_fields_set and payload.question_type == "LIKERT":
+            is_scored = True
+        await self._validate_scored_question(payload.question_type, is_scored, option_set_id)
 
         question = Question(
             instrument_version_id=instrument_version_id,
@@ -211,9 +211,9 @@ class QuestionService:
             question_text=payload.question_text,
             short_label=payload.short_label,
             question_type=payload.question_type,
-            question_role=question_role,
+            research_role=payload.research_role,
             category=payload.category,
-            is_scored=question_role == "SCORED",
+            is_scored=is_scored,
             is_required_default=payload.is_required_default,
             sort_order=payload.sort_order,
             validation_rules=payload.validation_rules,
@@ -236,13 +236,9 @@ class QuestionService:
 
         before = QuestionRead.model_validate(question).model_dump(mode="json")
         data = payload.model_dump(exclude_unset=True)
-        if "question_role" in data:
-            data["is_scored"] = data["question_role"] == "SCORED"
-        elif "is_scored" in data:
-            data["question_role"] = "SCORED" if data["is_scored"] else "DESCRIPTIVE"
         await self._validate_scored_question(
             data.get("question_type", question.question_type),
-            data.get("question_role", question.question_role),
+            data.get("is_scored", question.is_scored),
             data.get("option_set_id", question.option_set_id),
         )
         if "metadata" in data:
@@ -286,13 +282,9 @@ class QuestionService:
                 if question is None or question.instrument_version_id != instrument_version_id:
                     raise NotFoundError(f"Ítem {item.id} no encontrado en esta versión")
                 data = item.patch.model_dump(exclude_unset=True)
-                if "question_role" in data:
-                    data["is_scored"] = data["question_role"] == "SCORED"
-                elif "is_scored" in data:
-                    data["question_role"] = "SCORED" if data["is_scored"] else "DESCRIPTIVE"
                 await self._validate_scored_question(
                     data.get("question_type", question.question_type),
-                    data.get("question_role", question.question_role),
+                    data.get("is_scored", question.is_scored),
                     data.get("option_set_id", question.option_set_id),
                 )
                 if "metadata" in data:

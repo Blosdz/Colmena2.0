@@ -59,7 +59,7 @@ def test_likert_item_is_normalized_and_reverse_oriented() -> None:
         for value in range(1, 6)
     ]
     question = SimpleNamespace(
-        question_role="SCORED",
+        is_scored=True,
         question_type="LIKERT",
         option_set=SimpleNamespace(options=options),
     )

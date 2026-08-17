@@ -75,3 +75,27 @@ export function replaceBaremBands(baremId, bands) {
 export function activateBarem(baremId) {
   return apiRequest(`/barems/${baremId}/activate`, { method: 'POST' });
 }
+
+export function listStudyUnitTypes(studyId) {
+  return apiRequest(`/studies/${studyId}/unit-types`);
+}
+
+export function createStudyUnitType(studyId, payload) {
+  return apiRequest(`/studies/${studyId}/unit-types`, { method: 'POST', body: payload });
+}
+
+export function listStudyUnits(unitTypeId) {
+  return apiRequest(`/study-unit-types/${unitTypeId}/units`);
+}
+
+export function createStudyUnit(unitTypeId, payload) {
+  return apiRequest(`/study-unit-types/${unitTypeId}/units`, { method: 'POST', body: payload });
+}
+
+export function runCensopasScoring(studyId) {
+  return apiRequest(`/studies/${studyId}/censopas/scoring`, { method: 'POST' });
+}
+
+export function getCensopasUnitResults(studyId, unitTypeId) {
+  return apiRequest(`/studies/${studyId}/censopas/unit-results?unit_type_id=${unitTypeId}`);
+}

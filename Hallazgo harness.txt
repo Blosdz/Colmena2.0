@@ -1,0 +1,662 @@
+El hallazgo del harness es bueno porque cambia bastante la estrategia: **Colmena no está en una etapa de “crear el módulo analítico”, sino de consolidar, tipar y cerrar huecos de una implementación que ya existe.**
+
+Lo más importante es **no seguir literalmente el MD anterior creando `features/analytics/` desde cero**. Eso probablemente duplicaría código que ya existe.
+
+Yo interpretaría el resultado así:
+
+### 1. Lo que ya puedes considerar resuelto
+
+El backend ya cubre buena parte del motor estadístico que necesitabas:
+
+* Spearman.
+* Chi-cuadrado.
+* Mann–Whitney.
+* Kruskal–Wallis.
+* Alfa de Cronbach.
+* Omega.
+* Corrección Benjamini–Hochberg.
+* Variables.
+* Árbol de constructos/dimensiones.
+* Baremos, cortes y bandas.
+* `AnalysisRun`.
+* Supresión `n < 5`.
+* Protección frente a deducción secundaria.
+
+Y el frontend ya tiene piezas reales para:
+
+* baremos;
+* barras apiladas;
+* Spearman;
+* matriz de correlación;
+* scatter agregado/anonimizado;
+* comparación de grupos.
+
+Esto significa que el proyecto ya tiene prácticamente las cuatro capas que querías:
+
+```text
+RESPUESTAS
+   ↓
+SCORING
+   ↓
+BAREMOS
+   ↓
+DESCRIPTIVA
+   ↓
+INFERENCIA
+   ↓
+VISUALIZACIÓN
+```
+
+Por tanto, **no reescribiría el motor**.
+
+---
+
+## 2. La decisión más importante ahora: `telemetry/` vs `results/`
+
+Este debería ser el siguiente paso antes de escribir más componentes.
+
+Yo usaría esta regla:
+
+```text
+results/
+= resultados estadísticos y metodológicos de un estudio
+
+telemetry/
+= métricas operativas de la aplicación
+```
+
+Por ejemplo:
+
+```text
+results/
+├── descriptive
+├── dimensions
+├── barems
+├── correlations
+├── comparisons
+├── reliability
+└── advanced
+```
+
+Mientras:
+
+```text
+telemetry/
+├── requests
+├── errors
+├── performance
+├── usage
+└── application health
+```
+
+Si actualmente `telemetry/` contiene cosas como:
+
+```text
+DimensionChartCard
+BaremResultsPanel
+SpearmanPanel
+```
+
+entonces conceptualmente están mal ubicadas.
+
+**No significa que tengas que moverlas inmediatamente.**
+
+Primero conviene escribir un ADR:
+
+```text
+docs/architecture/
+└── ADR-analytics-results-telemetry.md
+```
+
+que establezca:
+
+> Las visualizaciones derivadas de respuestas de encuestas pertenecen al dominio `results/analytics`; telemetry queda reservado para observabilidad y métricas operativas de Colmena.
+
+Luego migrarlas progresivamente.
+
+No haría una reorganización masiva en un solo commit.
+
+---
+
+# 3. GAP-019: tipos frontend
+
+Este sí lo atacaría inmediatamente después de tomar la decisión arquitectónica.
+
+El harness encontró que tienes backend rico en Pydantic, pero frontend sin tipos.
+
+Eso es un hueco importante.
+
+No escribiría manualmente:
+
+```ts
+interface SpearmanResult {...}
+interface BaremResult {...}
+interface DimensionResult {...}
+```
+
+si ya existen schemas Pydantic.
+
+La arquitectura deseable sería:
+
+```text
+Pydantic
+   ↓
+OpenAPI
+   ↓
+generación
+   ↓
+frontend/generated/
+   ↓
+adapters
+   ↓
+components
+```
+
+Por ejemplo:
+
+```text
+src/api/generated/
+├── models/
+│   ├── AnalysisRun.ts
+│   ├── Barem.ts
+│   ├── BaremBand.ts
+│   ├── Variable.ts
+│   ├── Construct.ts
+│   └── ...
+└── services/
+```
+
+Y encima:
+
+```text
+src/features/results/adapters/
+```
+
+para adaptar el contrato backend a algo cómodo para UI.
+
+No modificar directamente los tipos generados.
+
+---
+
+# 4. Capabilities endpoint
+
+Este es otro gap real.
+
+Ahora mismo probablemente tienes lógica implícita:
+
+```text
+si existe variable...
+si existe barem...
+si viene correlation...
+mostrar botón...
+```
+
+Eso termina creando condiciones repartidas por frontend.
+
+Backend debería eventualmente responder algo parecido a:
+
+```json
+{
+  "project_id": "123",
+  "capabilities": {
+    "descriptive": {
+      "available": true
+    },
+    "barems": {
+      "available": true
+    },
+    "spearman": {
+      "available": true
+    },
+    "chi_square": {
+      "available": true
+    },
+    "mann_whitney": {
+      "available": true
+    },
+    "kruskal_wallis": {
+      "available": true
+    },
+    "reliability": {
+      "cronbach": true,
+      "omega": true
+    },
+    "scatter": {
+      "available": true,
+      "mode": "BINNED_PRIVACY_SAFE"
+    },
+    "confidence_intervals": {
+      "available": false
+    }
+  }
+}
+```
+
+Entonces frontend no pregunta:
+
+```js
+if (...)
+```
+
+sino:
+
+```js
+capabilities.spearman.available
+```
+
+Mientras no exista endpoint, sí puedes usar:
+
+```text
+deriveAnalyticsCapabilities()
+```
+
+pero etiquetarlo `TECH_DEBT`, como dice el harness.
+
+---
+
+# 5. Scatter raw bloqueado: no es GAP
+
+Esto es importante.
+
+El MD anterior suponía:
+
+```text
+(x1,y1)
+(x2,y2)
+...
+```
+
+pero el harness encontró que la arquitectura deliberadamente entrega datos agregados en bins.
+
+Para Colmena, especialmente CENSOPAS, eso es mejor.
+
+Así que debes actualizar el requisito.
+
+No:
+
+```text
+SCATTER_DATA_MISSING
+```
+
+sino algo como:
+
+```text
+scatter.mode =
+RAW
+BINNED
+AGGREGATED
+UNAVAILABLE
+```
+
+Para CENSOPAS:
+
+```text
+BINNED
+```
+
+debería ser incluso la opción preferida.
+
+Ejemplo:
+
+```json
+{
+  "type": "BINNED_SCATTER",
+  "x_variable": "D1",
+  "y_variable": "D5",
+  "bins": [
+    {
+      "x": 35,
+      "y": 45,
+      "count": 12
+    }
+  ]
+}
+```
+
+Así puedes mostrar relaciones sin exponer observaciones individuales.
+
+Eso coincide mucho mejor con el enfoque colectivo que exige CENSOPAS. El manual establece que no deben generarse perfiles individuales y que deben protegerse las unidades pequeñas. 
+
+---
+
+# 6. Confidence intervals: este sí es un GAP estadístico real
+
+Este es uno de los hallazgos que sí debería quedar en backlog.
+
+El modelo premium de Colmena contempla IC 95 % como parte de la capa inferencial y los usa para comunicar precisión. 
+
+Pero no necesitas bloquear el sistema por eso.
+
+Puedes definir:
+
+```text
+GAP-INFERENTIAL-IC
+Estado: TODO
+Prioridad: MEDIA
+```
+
+Y avanzar así:
+
+### Primera etapa
+
+```text
+coeficiente
+p
+q
+tamaño de efecto
+n
+```
+
+### Segunda etapa
+
+```text
+IC 95%
+```
+
+Para Spearman, por ejemplo, el backend podría añadir posteriormente bootstrap.
+
+Pero eso merece una especificación estadística separada; no conviene improvisarlo sólo para llenar una columna.
+
+---
+
+# 7. Score/barem traceability
+
+Este gap me parece más importante que agregar otro gráfico.
+
+El harness encontró:
+
+> weights can drift post-hoc
+
+y:
+
+> barem results reference barem_id but not a frozen version
+
+Eso afecta reproducibilidad.
+
+Imagina:
+
+```text
+Tesis calculada en agosto
+
+D1 = 72
+Nivel = Alto
+```
+
+Luego alguien modifica:
+
+```text
+peso de ítem
+o
+baremo
+```
+
+y al volver a abrir el reporte:
+
+```text
+D1 = 68
+Nivel = Medio
+```
+
+Eso sería problemático.
+
+Yo priorizaría introducir snapshot/versionado:
+
+```text
+AnalysisRun
+├── instrument_version_id
+├── scoring_version
+├── barem_version_id
+├── algorithm_version
+├── dataset_hash
+└── calculated_at
+```
+
+Y, si los pesos están configurables:
+
+```text
+analysis_construct_items
+```
+
+debería congelar:
+
+```text
+item_id
+weight
+polarity
+```
+
+utilizados en el cálculo.
+
+---
+
+# 8. Los tests son ahora una prioridad alta
+
+Que no haya frontend tests ni siquiera runner configurado sí es un hueco considerable.
+
+Especialmente porque manejas:
+
+* privacidad;
+* baremos;
+* estadística;
+* supresión;
+* filtros.
+
+Yo empezaría con tests de comportamiento, no snapshots visuales.
+
+Los primeros serían:
+
+```text
+1. BaremResultsPanel
+2. SpearmanPanel
+3. n < 5 suppression
+4. binned scatter
+5. missing barem
+6. failed analysis
+7. loading analysis
+8. group comparison
+```
+
+Y específicamente:
+
+```text
+Nunca revelar valores suprimidos:
+- chart
+- tooltip
+- table
+- label
+```
+
+---
+
+# 9. No cambiaría Recharts por Chart.js
+
+Este hallazgo también cambia algo de lo que veníamos hablando.
+
+Si Recharts ya funciona:
+
+```text
+NO migraría a Chart.js
+```
+
+sólo porque aparecía en una especificación anterior.
+
+La librería gráfica es secundaria.
+
+Tu arquitectura debería ser:
+
+```text
+Result
+  ↓
+ViewModel
+  ↓
+Visualization component
+  ↓
+Recharts
+```
+
+No:
+
+```text
+Backend
+  ↓
+Chart.js
+```
+
+Si Recharts ya soporta:
+
+* stacked bar;
+* scatter;
+* heatmap/matrices mediante composición;
+* line;
+* tooltip;
+
+no hay una justificación suficiente para reemplazarlo.
+
+---
+
+# 10. Qué implementaría ahora
+
+Mi orden sería:
+
+```text
+FASE 1 — arquitectura
+GAP-024
+telemetry vs results
+↓
+ADR
+
+FASE 2 — contratos
+GAP-019
+OpenAPI → frontend types
+
+FASE 3 — tests
+configurar Vitest/Jest según stack
+tests de panels existentes
+
+FASE 4 — reutilización
+extraer:
+BaremTable
+CorrelationHeatmap
+DimensionComparisonChart
+StatSummary
+
+FASE 5 — capabilities
+endpoint backend
+o temporal deriveAnalyticsCapabilities()
+
+FASE 6 — trazabilidad
+freeze scoring
+freeze barem version
+analysis metadata
+
+FASE 7 — inferencia faltante
+IC 95%
+
+FASE 8 — UX
+consolidar dashboard
+```
+
+---
+
+# 11. La estructura final probablemente debería ser más pequeña que la propuesta inicial
+
+En vez de construir esto desde cero:
+
+```text
+features/analytics/
+```
+
+yo evolucionaría lo existente hacia:
+
+```text
+src/
+├── features/
+│   └── results/
+│       ├── pages/
+│       ├── panels/
+│       ├── components/
+│       │   ├── charts/
+│       │   ├── tables/
+│       │   └── stats/
+│       ├── adapters/
+│       ├── hooks/
+│       └── types/
+│
+├── api/
+│   └── generated/
+│
+└── telemetry/
+    └── application-observability
+```
+
+Y dentro de results:
+
+```text
+Results
+├── Overview
+├── Descriptive
+├── Barems
+├── Dimensions
+├── Correlations
+├── Comparisons
+├── Reliability
+└── Advanced
+```
+
+Esto encaja mejor con lo que el harness realmente encontró.
+
+---
+
+## Lo que le indicaría ahora al harness
+
+La siguiente instrucción podría ser:
+
+```text
+No implementes aún nuevos gráficos ni crees features/analytics/.
+
+Primero:
+
+1. Produce un ADR que compare telemetry/ vs results/ y proponga la estructura objetivo sin realizar todavía una migración masiva.
+
+2. Identifica exactamente qué componentes analíticos existentes están actualmente bajo telemetry/, results/ u otros módulos.
+
+3. Clasifica cada uno como:
+   - mantener,
+   - mover,
+   - extraer como reusable,
+   - deprecar,
+   - duplicado.
+
+4. Genera tipos TypeScript desde los schemas/OpenAPI reales de FastAPI/Pydantic. No dupliques manualmente schemas existentes.
+
+5. Configura el test runner del frontend y crea los primeros tests de:
+   - BaremResultsPanel
+   - SpearmanPanel
+   - privacy suppression n < 5
+   - binned scatter
+   - analysis loading/error state
+
+6. No cambies Recharts por Chart.js.
+
+7. No intentes habilitar raw scatter pairs. El diseño privacy-safe con bins es intencional.
+
+8. Documenta como gaps separados:
+   - confidence intervals;
+   - capabilities endpoint;
+   - scoring snapshot/version;
+   - barem frozen version.
+
+No implementes los cuatro gaps en el mismo cambio.
+
+Al finalizar entrega:
+- ADR propuesto;
+- árbol actual;
+- árbol objetivo;
+- lista de archivos afectados;
+- tipos generados;
+- tests añadidos;
+- gaps actualizados;
+- recomendación del siguiente PR.
+```
+
+Ese sería el camino más seguro. **El hallazgo principal del harness es que la prioridad ya no es “construir analytics”, sino convertir lo que tienes en una arquitectura estable, reproducible y testeada.**

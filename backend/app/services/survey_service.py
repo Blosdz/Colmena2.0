@@ -76,7 +76,7 @@ class SurveyService:
 
         exogenous_section = None
         instrument_section = None
-        if any(question.question_role == "EXOGENOUS" for question in questions):
+        if any(question.research_role == "EXOGENOUS" for question in questions):
             exogenous_section = SurveySection(
                 survey_id=survey.id,
                 title="Datos de perfil",
@@ -85,7 +85,7 @@ class SurveyService:
                 sort_order=0,
             )
             self.session.add(exogenous_section)
-        if any(question.question_role != "EXOGENOUS" for question in questions):
+        if any(question.research_role != "EXOGENOUS" for question in questions):
             instrument_section = SurveySection(
                 survey_id=survey.id,
                 title="Instrumento",
@@ -99,12 +99,12 @@ class SurveyService:
         ordered_questions = sorted(
             questions,
             key=lambda question: (
-                0 if question.question_role == "EXOGENOUS" else 1,
+                0 if question.research_role == "EXOGENOUS" else 1,
                 question.sort_order if question.sort_order is not None else question.id,
             ),
         )
         for index, question in enumerate(ordered_questions):
-            section = exogenous_section if question.question_role == "EXOGENOUS" else instrument_section
+            section = exogenous_section if question.research_role == "EXOGENOUS" else instrument_section
             link = SurveyQuestion(
                 survey_id=survey.id,
                 question_id=question.id,

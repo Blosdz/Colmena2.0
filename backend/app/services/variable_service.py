@@ -112,7 +112,7 @@ class VariableService:
             question_text=payload.question_text,
             short_label=payload.name,
             question_type=self._question_type_for_data_type(payload.data_type),
-            question_role="EXOGENOUS",
+            research_role="EXOGENOUS",
             category="Datos de perfil",
             is_scored=False,
             is_required_default=payload.is_required,
@@ -134,7 +134,7 @@ class VariableService:
             measurement_level=payload.measurement_level,
             role="EXOGENOUS",
             is_editable=True,
-            metadata_={**payload.metadata, "question_role": "EXOGENOUS"},
+            metadata_={**payload.metadata, "research_role": "EXOGENOUS"},
         )
         self.session.add(variable)
         await self.session.flush()

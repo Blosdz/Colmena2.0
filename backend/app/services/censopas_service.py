@@ -530,7 +530,18 @@ class CensopasScoringService:
             errors.append("NON_SCORED_QUESTIONS_IN_SCORING_MATRIX")
         if scored_questions - ruled_questions:
             errors.append("MISSING_VALIDATED_SCORING_RULES")
-        if any(not construct.item_links for construct in scored_constructs):
+        scored_construct_ids = {construct.id for construct in scored_constructs}
+        parent_ids_with_scored_children = {
+            construct.parent_id
+            for construct in scored_constructs
+            if construct.parent_id in scored_construct_ids
+        }
+        leaf_scored_constructs = [
+            construct
+            for construct in scored_constructs
+            if construct.id not in parent_ids_with_scored_children
+        ]
+        if any(not construct.item_links for construct in leaf_scored_constructs):
             errors.append("EMPTY_SCORING_CONSTRUCTS")
 
         required_construct_ids = {construct.id for construct in scored_constructs}

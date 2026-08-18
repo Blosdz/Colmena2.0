@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, Download, FileText, ShieldCheck } from 'lucide-react';
+import { Download, FileText, ShieldCheck } from 'lucide-react';
 
 import { useAuth } from '../../../auth/AuthContext.jsx';
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
@@ -21,6 +21,8 @@ import FormField from '../../../components/ui/FormField.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import StudySelector from '../../../components/colmena/StudySelector.jsx';
 import ReportWizardSteps from '../../../components/colmena/reports/ReportWizardSteps.jsx';
+import CensopasReadinessPanel from '../../../components/colmena/instruments/CensopasReadinessPanel.jsx';
+import { displayLabel } from '../../../utils/labels.js';
 
 const SECTIONS = [
   { key: 'portada', label: 'Portada' },
@@ -114,58 +116,7 @@ export default function ProjectReportsPage() {
           <div className="flex flex-col gap-4">
             <StudySelector projectId={projectId} studyId={studyId} onStudyChange={setStudyId} />
             {studyId ? (
-              <div className="rounded-2xl border border-border bg-surface p-4">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck size={18} className="text-turquoise" />
-                    <div>
-                      <p className="text-sm font-semibold text-dark">Preparación CENSOPAS-COPSOQ</p>
-                      <p className="text-xs text-muted">
-                        {isLoadingReadiness ? 'Verificando estructura…' : 'Versión ' + (readiness?.version_kind || 'desconocida')}
-                      </p>
-                    </div>
-                  </div>
-                  {readiness ? (
-                    <span className={'colmena-badge ' + (readiness.ready_for_scoring ? 'bg-turquoise/10 text-turquoise' : 'bg-danger/10 text-danger')}>
-                      {readiness.ready_for_scoring ? 'Listo para scoring' : 'Configuración incompleta'}
-                    </span>
-                  ) : null}
-                </div>
-                {readiness ? (
-                  <>
-                    <div className="grid gap-2 sm:grid-cols-4">
-                      {[
-                        ['Preguntas', 'questions'],
-                        ['Puntuables', 'scored'],
-                        ['Dimensiones', 'dimensions'],
-                        ['Subdimensiones', 'subdimensions'],
-                      ].map(([label, key]) => {
-                        const matches = readiness.actual[key] === readiness.expected[key];
-                        return (
-                          <div key={key} className="rounded-xl border border-border bg-background/60 p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
-                            <p className={'mt-1 text-sm font-bold ' + (matches ? 'text-dark' : 'text-danger')}>
-                              {readiness.actual[key] ?? 0} / {readiness.expected[key] ?? '—'}
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-3 flex items-start gap-2 rounded-xl border border-border px-3 py-2">
-                      {readiness.ready_for_official_reporting ? (
-                        <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-turquoise" />
-                      ) : (
-                        <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber" />
-                      )}
-                      <p className="text-xs text-muted">
-                        {readiness.ready_for_official_reporting
-                          ? 'Equivalencia oficial habilitada y baremo completo.'
-                          : 'La salida oficial está bloqueada. Puedes generar un documento provisional claramente etiquetado.'}
-                      </p>
-                    </div>
-                  </>
-                ) : null}
-              </div>
+              <CensopasReadinessPanel readiness={readiness} isLoading={isLoadingReadiness} />
             ) : null}
             <Button variant="primary" size="sm" onClick={() => setStep(1)} disabled={!studyId} className="w-40">
               Continuar
@@ -285,7 +236,7 @@ export default function ProjectReportsPage() {
             ) : (
               <div className="flex flex-col gap-3">
                 <div className="flex items-center gap-2">
-                  <StatusPill label={reportStatus?.status || report.status} tone="report" />
+                  <StatusPill label={displayLabel(reportStatus?.status || report.status)} tone="report" />
                   {reportStatus?.error_message ? <span className="text-sm text-danger">{reportStatus.error_message}</span> : null}
                 </div>
                 {reportStatus?.status === 'COMPLETED' ? (

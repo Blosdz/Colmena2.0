@@ -4,6 +4,7 @@ import { Calculator, ShieldAlert } from 'lucide-react';
 
 import { formatNumber, formatPercent } from '../../../utils/format.js';
 import { semanticBandColor, semanticBandOrder } from '../../../utils/chartColors.js';
+import { displayLabel } from '../../../utils/labels.js';
 import { getResultsOverview, getStudy, listBarems, runScoring, updateStudy } from '../../../api/studies.js';
 import { Button } from '../../ui/Button.jsx';
 import { EmptyState } from '../../ui/EmptyState.jsx';
@@ -66,7 +67,7 @@ export default function BaremResultsPanel({ studyId }) {
           <span className="colmena-label">Baremo del estudio</span>
           <select className="colmena-input h-10 px-4 text-sm" value={study.barem_id || ''} onChange={(event) => selectBarem.mutate(event.target.value)}>
             <option value="">Sin baremo (sólo puntajes)</option>
-            {barems.map((barem) => <option key={barem.id} value={barem.id}>{barem.name} · {barem.status}</option>)}
+            {barems.map((barem) => <option key={barem.id} value={barem.id}>{barem.name} · {displayLabel(barem.status)}</option>)}
           </select>
         </div>
         <div className="flex items-center gap-3">

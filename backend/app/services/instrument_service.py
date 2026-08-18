@@ -327,7 +327,8 @@ class InstrumentService:
 
     async def get_tree(self, version_id: int) -> InstrumentTree:
         version = await self.get_version(version_id)
-        editable = (await InstrumentEditPolicy.evaluate_async(self.session, version.instrument, version)).editable
+        editable_status = await InstrumentEditPolicy.evaluate_async(self.session, version.instrument, version)
+        editable = editable_status.editable
 
         constructs_stmt = (
             select(Construct)
@@ -390,6 +391,7 @@ class InstrumentService:
         return InstrumentTree(
             instrument_version_id=version_id,
             editable=editable,
+            lock_reason=editable_status.reason,
             variables=variables,
         )
 

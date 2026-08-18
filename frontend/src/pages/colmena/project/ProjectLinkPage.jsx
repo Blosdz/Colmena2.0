@@ -21,6 +21,7 @@ import { EmptyState } from '../../../components/ui/EmptyState.jsx';
 import { LoadingState } from '../../../components/ui/LoadingState.jsx';
 import FormField from '../../../components/ui/FormField.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
+import { displayLabel } from '../../../utils/labels.js';
 
 const STUDY_TYPES = [
   { value: 'ACADEMIC', label: 'Académico' },
@@ -143,10 +144,10 @@ function StudiesTable({ studies, onOpen, onClose, onArchive, isMutating }) {
               <tr key={study.id} className="transition hover:bg-[#fafbfc]">
                 <td className="border-b border-r border-border px-4 py-3 font-medium text-dark">{study.name}</td>
                 <td className="border-b border-r border-border px-4 py-3">
-                  <StatusPill label={study.study_type} tone="neutral" />
+                  <StatusPill label={displayLabel(study.study_type)} tone="neutral" />
                 </td>
                 <td className="border-b border-r border-border px-4 py-3">
-                  <StatusPill label={study.status} tone={STUDY_TONE[study.status] || 'neutral'} />
+                  <StatusPill label={displayLabel(study.status)} tone={STUDY_TONE[study.status] || 'neutral'} />
                 </td>
                 <td className="border-b border-r border-border px-4 py-3">
                   {study.status === 'OPEN' ? (

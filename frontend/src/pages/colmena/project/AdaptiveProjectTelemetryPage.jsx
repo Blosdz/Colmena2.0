@@ -12,6 +12,7 @@ import {
 } from '../../../api/studies.js';
 import { getProjectTelemetry } from '../../../api/telemetry.js';
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
+import { displayLabel } from '../../../utils/labels.js';
 
 import { PageHeader } from '../../../components/layout/PageHeader.jsx';
 import { Button } from '../../../components/ui/Button.jsx';
@@ -144,7 +145,7 @@ export default function AdaptiveProjectTelemetryPage() {
               value={studyId || ''}
             >
               <option value="">Selecciona un estudio</option>
-              {studies.map((study) => <option key={study.id} value={study.id}>{study.name} ({study.status})</option>)}
+              {studies.map((study) => <option key={study.id} value={study.id}>{study.name} ({displayLabel(study.status)})</option>)}
             </select>
           </label>
           <div className="flex items-center gap-2 text-[11px] text-muted">

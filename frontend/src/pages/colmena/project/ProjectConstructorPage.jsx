@@ -13,6 +13,7 @@ import {
   createProjectInstrument,
   createItem,
   createLikertScale,
+  getCensopasReadiness,
   getConstructMatrix,
   getInstrumentTree,
   getItem,
@@ -36,6 +37,7 @@ import LikertScaleManager from '../../../components/colmena/instruments/LikertSc
 import BaremBuilder from '../../../components/colmena/instruments/BaremBuilder.jsx';
 import ProjectCreateModal from '../../../components/colmena/projects/ProjectCreateModal.jsx';
 import ExogenousFieldsManager from '../../../components/colmena/variables/ExogenousFieldsManager.jsx';
+import CensopasReadinessPanel from '../../../components/colmena/instruments/CensopasReadinessPanel.jsx';
 
 function collectConstructCodes(nodes, codes = new Set()) {
   nodes?.forEach((node) => {
@@ -365,6 +367,16 @@ export default function ProjectConstructorPage() {
   const activeInstrument =
     instruments.find((instrument) => instrument.id === preferredInstrumentId) || instruments[0] || null;
 
+  const { data: readiness, isFetching: isLoadingReadiness } = useQuery({
+    queryKey: ['censopas-readiness', activeInstrument?.versionId],
+    queryFn: () => getCensopasReadiness(activeInstrument.versionId),
+    enabled: Boolean(activeInstrument?.versionId),
+    retry: false,
+  });
+  // Sólo instrumentos CENSOPAS corta/media resuelven un version_kind conocido;
+  // para el resto (proyectos académicos genéricos) el checklist no aplica.
+  const showReadinessPanel = Boolean(readiness && readiness.version_kind !== 'UNKNOWN');
+
   const createInstrumentMutation = useMutation({
     mutationFn: async () => {
       if (activeInstrument && !activeInstrument.versionId) {
@@ -442,8 +454,12 @@ export default function ProjectConstructorPage() {
         eyebrow="Constructor"
         title={project.name}
         description="Organiza la medición en variables con dimensiones y preguntas directas. El cuestionario funciona sólo como contenedor metodológico."
-       
+
       />
+
+      {showReadinessPanel ? (
+        <CensopasReadinessPanel readiness={readiness} isLoading={isLoadingReadiness} />
+      ) : null}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-2xl border border-border lg:grid-cols-[210px_minmax(0,1fr)]">
         <nav className="flex flex-row gap-2 overflow-x-auto border-b border-border bg-white p-2 lg:flex-col lg:border-b-0 lg:border-r">

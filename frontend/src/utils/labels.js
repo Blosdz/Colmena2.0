@@ -7,6 +7,8 @@ const LABELS = {
   DEMOGRAPHIC: 'Demográfica', EXOGENOUS: 'Exógena', DERIVED: 'Derivada', OUTCOME: 'Resultado',
   GROUPING: 'Agrupación', FILTER: 'Filtro', ANALYSIS: 'Análisis', REPORTING: 'Reporte',
   SCORED: 'Puntuable', CONTEXT: 'Contexto', EXCLUDED: 'Excluido', MEDIUM: 'Medio', SMALL: 'Pequeño', LARGE: 'Grande', NEGLIGIBLE: 'Despreciable',
+  INDEPENDENT: 'Independiente', DEPENDENT: 'Dependiente', CONTROL: 'Control',
+  INSTRUMENT: 'Instrumento', DATE: 'Fecha', DIRECT: 'Directa', REVERSE: 'Inversa',
 };
 
 export function displayLabel(value, fallback = '—') {

@@ -140,6 +140,7 @@ class InstrumentTreeVariable(BaseModel):
 class InstrumentTree(BaseModel):
     instrument_version_id: int
     editable: bool
+    lock_reason: str | None = None
     variables: list[InstrumentTreeVariable] = Field(default_factory=list)
 
 

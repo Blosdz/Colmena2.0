@@ -15,6 +15,7 @@ import { EmptyState } from '../../../components/ui/EmptyState.jsx';
 import { LoadingState } from '../../../components/ui/LoadingState.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import DimensionDashboardTab from '../../../components/colmena/telemetry/DimensionDashboardTab.jsx';
+import { displayLabel } from '../../../utils/labels.js';
 
 const TABS = [
   { key: 'resumen', label: 'Resumen' },
@@ -170,7 +171,7 @@ export default function ProjectTelemetryPage() {
                     {variableApplications.map((variable) => (
                       <tr key={`${variable.studyId}:${variable.construct_id}`} className="border-t border-border">
                         <td className="px-4 py-3"><p className="font-medium text-dark">{variable.variable_name}</p><p className="font-mono text-xs text-muted">{variable.variable_code}</p></td>
-                        <td className="px-4 py-3 text-xs">{variable.role || '—'}</td>
+                        <td className="px-4 py-3 text-xs">{displayLabel(variable.role)}</td>
                         <td className="px-4 py-3 text-dark">{variable.studyName}</td>
                         <td className="px-4 py-3">{variable.question_count}</td>
                         <td className="px-4 py-3">{variable.sessions_started}</td>

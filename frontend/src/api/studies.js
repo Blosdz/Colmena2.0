@@ -99,3 +99,7 @@ export function runCensopasScoring(studyId) {
 export function getCensopasUnitResults(studyId, unitTypeId) {
   return apiRequest(`/studies/${studyId}/censopas/unit-results?unit_type_id=${unitTypeId}`);
 }
+
+export function getCensopasResults(studyId) {
+  return apiRequest(`/studies/${studyId}/censopas/results`);
+}

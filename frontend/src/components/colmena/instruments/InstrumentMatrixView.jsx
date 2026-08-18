@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 
 import { EmptyState } from '../../ui/EmptyState.jsx';
+import { displayLabel } from '../../../utils/labels.js';
 
 const columns = [
   { accessorKey: 'item_code', header: 'Ítem' },
@@ -10,8 +11,8 @@ const columns = [
   { accessorKey: 'dimension_name', header: 'Dimensión', cell: (info) => info.getValue() || 'Pregunta directa' },
   { accessorKey: 'subdimension_name', header: 'Subdimensión', cell: (info) => info.getValue() || '—' },
   { accessorKey: 'weight', header: 'Peso' },
-  { accessorKey: 'scoring_direction', header: 'Dirección', cell: (info) => info.getValue() || '—' },
-  { accessorKey: 'status', header: 'Estado' },
+  { accessorKey: 'scoring_direction', header: 'Dirección', cell: (info) => info.getValue() ? displayLabel(info.getValue()) : '—' },
+  { accessorKey: 'status', header: 'Estado', cell: (info) => displayLabel(info.getValue()) },
 ];
 
 export default function InstrumentMatrixView({ matrix }) {

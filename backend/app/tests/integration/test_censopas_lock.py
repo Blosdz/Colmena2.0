@@ -24,7 +24,9 @@ async def test_locked_censopas_tree_reports_not_editable(
     _instrument, version = seed_censopas_locked
     resp = await client.get(f"/api/v1/instrument-versions/{version.id}/tree")
     assert resp.status_code == 200
-    assert resp.json()["editable"] is False
+    body = resp.json()
+    assert body["editable"] is False
+    assert body["lock_reason"] == "SYSTEM_INSTRUMENT_LOCKED"
 
 
 async def test_clone_is_always_allowed_even_when_locked(

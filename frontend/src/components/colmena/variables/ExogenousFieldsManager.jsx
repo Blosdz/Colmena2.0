@@ -1,11 +1,19 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, LockKeyhole, Plus, Trash2 } from 'lucide-react';
 
 import { createExogenousField, listExogenousFields } from '../../../api/variables.js';
+import { getInstrumentTree } from '../../../api/instruments.js';
 import { Button } from '../../ui/Button.jsx';
 import { Card } from '../../ui/Card.jsx';
 import { EmptyState } from '../../ui/EmptyState.jsx';
+import { displayLabel } from '../../../utils/labels.js';
+
+const LOCK_MESSAGES = {
+  SYSTEM_INSTRUMENT_LOCKED: 'Este instrumento es de sistema y no admite campos exógenos nuevos en su estado actual.',
+  STUDY_OPEN_STRUCTURAL_LOCK:
+    'El estudio de este instrumento ya está abierto y recolectando respuestas, así que su estructura quedó congelada — incluidos los campos exógenos. Agrega los campos de segmentación antes de abrir el estudio, o clona una versión editable si necesitas seguir cambiándola.',
+};
 
 const MIN_OPTIONS = 2;
 
@@ -34,6 +42,12 @@ export default function ExogenousFieldsManager({ projectId, versionId }) {
     queryFn: () => listExogenousFields(projectId),
     enabled: Boolean(projectId),
   });
+  const { data: tree } = useQuery({
+    queryKey: ['instrumentTree', versionId],
+    queryFn: () => getInstrumentTree(versionId),
+    enabled: Boolean(versionId),
+  });
+  const isLocked = tree ? !tree.editable : false;
   const categoryOptions = buildCategoryOptions(form.options, form.measurementLevel);
   const mutation = useMutation({
     mutationFn: () => createExogenousField(projectId, {
@@ -81,6 +95,17 @@ export default function ExogenousFieldsManager({ projectId, versionId }) {
 
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+      {isLocked ? (
+        <div className="flex gap-3 rounded-2xl border border-amber/20 bg-yellowSoft p-4 xl:col-span-2">
+          <LockKeyhole size={18} className="mt-0.5 shrink-0 text-yellowDark" />
+          <div>
+            <p className="text-sm font-semibold text-dark">La estructura de este instrumento está bloqueada.</p>
+            <p className="mt-1 text-xs text-yellowDark">
+              {LOCK_MESSAGES[tree?.lock_reason] || 'No se pueden agregar campos exógenos nuevos en el estado actual del instrumento.'}
+            </p>
+          </div>
+        </div>
+      ) : null}
       <Card padded={false}>
         <div className="border-b border-border px-4 py-4">
           <p className="text-sm font-semibold text-dark">Campos exógenos</p>
@@ -90,12 +115,13 @@ export default function ExogenousFieldsManager({ projectId, versionId }) {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-surfaceSoft text-xs uppercase text-muted"><tr><th className="px-4 py-3">Código</th><th className="px-4 py-3">Campo</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Nivel</th></tr></thead>
-              <tbody>{fields.map(({ variable, question }) => <tr key={variable.id} className="border-t border-border"><td className="px-4 py-3 font-mono text-xs">{variable.code}</td><td className="px-4 py-3"><p className="font-medium text-dark">{variable.name}</p><p className="text-xs text-muted">{question.question_text}</p></td><td className="px-4 py-3">{variable.data_type}</td><td className="px-4 py-3">{variable.measurement_level}</td></tr>)}</tbody>
+              <tbody>{fields.map(({ variable, question }) => <tr key={variable.id} className="border-t border-border"><td className="px-4 py-3 font-mono text-xs">{variable.code}</td><td className="px-4 py-3"><p className="font-medium text-dark">{variable.name}</p><p className="text-xs text-muted">{question.question_text}</p></td><td className="px-4 py-3">{displayLabel(variable.data_type)}</td><td className="px-4 py-3">{displayLabel(variable.measurement_level)}</td></tr>)}</tbody>
             </table>
           </div>
         ) : <div className="p-4"><EmptyState title="Sin campos de perfil" description="Edad, sexo, sede y otros datos son opcionales." /></div>}
       </Card>
 
+      {isLocked ? null : (
       <Card>
         <div className="flex flex-col gap-4">
           <div><p className="text-sm font-semibold text-dark">Agregar campo</p><p className="mt-1 text-xs text-muted">Se crea la pregunta y su variable exógena en una sola transacción.</p></div>
@@ -152,6 +178,7 @@ export default function ExogenousFieldsManager({ projectId, versionId }) {
           <Button variant="primary" size="sm" onClick={() => mutation.mutate()} loading={mutation.isPending} disabled={!form.code || !form.name || !form.questionText || (form.dataType === 'CATEGORY' && categoryOptions.length < MIN_OPTIONS)}>Agregar campo</Button>
         </div>
       </Card>
+      )}
     </div>
   );
 }

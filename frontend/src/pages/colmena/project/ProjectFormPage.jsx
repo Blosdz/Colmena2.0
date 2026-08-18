@@ -17,6 +17,7 @@ import { LoadingState } from '../../../components/ui/LoadingState.jsx';
 import { StatusPill } from '../../../components/ui/StatusPill.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import SurveyThemePicker from '../../../components/colmena/survey/SurveyThemePicker.jsx';
+import { displayLabel } from '../../../utils/labels.js';
 
 /**
  * El backend sólo permite poblar preguntas de un survey vía
@@ -101,8 +102,8 @@ export default function ProjectFormPage() {
             <div className="flex flex-col gap-3">
               <p className="text-sm font-semibold text-dark">{survey.name}</p>
               <div className="flex items-center gap-2">
-                <StatusPill label={survey.survey_type} tone="neutral" />
-                <StatusPill label={survey.status} tone={survey.status === 'ACTIVE' ? 'active' : 'draft'} />
+                <StatusPill label={displayLabel(survey.survey_type)} tone="neutral" />
+                <StatusPill label={displayLabel(survey.status)} tone={survey.status === 'ACTIVE' ? 'active' : 'draft'} />
               </div>
               <p className="text-sm text-muted">
                 Continúa en{' '}

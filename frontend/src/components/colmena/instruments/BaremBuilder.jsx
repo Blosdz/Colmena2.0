@@ -38,7 +38,7 @@ export default function BaremBuilder({ versionId, projectId }) {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState('');
   const [levels, setLevels] = useState(3);
-  const [direction, setDirection] = useState('HIGHER_BETTER');
+  const [direction, setDirection] = useState('');
   const [generationMethod, setGenerationMethod] = useState('EQUAL_INTERVAL');
   const [pilotStudyId, setPilotStudyId] = useState('');
   const [draftBands, setDraftBands] = useState([]);
@@ -285,8 +285,9 @@ export default function BaremBuilder({ versionId, projectId }) {
                   <label className="flex flex-col gap-2">
                     <span className="colmena-label">Sentido</span>
                     <select className="colmena-input h-10 px-3 text-sm" value={direction} onChange={(event) => setDirection(event.target.value)}>
+                      <option value="">Selecciona…</option>
                       <option value="HIGHER_BETTER">Mayor = favorable</option>
-                      <option value="LOWER_BETTER">Menor = favorable</option>
+                      <option value="LOWER_BETTER">Menor = favorable (p. ej. riesgo)</option>
                     </select>
                   </label>
                   <label className="flex flex-col gap-2">
@@ -310,7 +311,7 @@ export default function BaremBuilder({ versionId, projectId }) {
                     size="sm"
                     onClick={() => generateMutation.mutate()}
                     loading={generateMutation.isPending}
-                    disabled={!variableConstructs.length || (generationMethod === 'QUANTILES' && !pilotStudyId)}
+                    disabled={!variableConstructs.length || !direction || (generationMethod === 'QUANTILES' && !pilotStudyId)}
                   >
                     <Sparkles size={14} /> Proponer cortes
                   </Button>

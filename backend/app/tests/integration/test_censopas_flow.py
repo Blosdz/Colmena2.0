@@ -575,7 +575,7 @@ async def test_generated_barem_targets_only_project_root_and_can_copy_for_editin
 
     generated_resp = await client.post(
         f"/api/v1/barems/{barem['id']}/generate-bands",
-        json={"levels": 3, "method": "EQUAL_INTERVAL"},
+        json={"levels": 3, "method": "EQUAL_INTERVAL", "direction": "HIGHER_BETTER"},
     )
     assert generated_resp.status_code == 200, generated_resp.text
     generated = generated_resp.json()
@@ -594,3 +594,89 @@ async def test_generated_barem_targets_only_project_root_and_can_copy_for_editin
     assert editable_copy["status"] == "DRAFT"
     assert len(editable_copy["bands"]) == 3
     assert {band["construct_id"] for band in editable_copy["bands"]} == {project_root["id"]}
+
+
+async def test_readiness_does_not_require_items_on_dimensions_with_subdimensions(
+    client: AsyncClient,
+) -> None:
+    """DIMENSION -> SUBDIMENSION -> ITEM: items are linked at the leaf
+    (subdimension) level only, per how the Constructor UI models CENSOPAS
+    Media. A dimension that rolls up through subdimensions must not be
+    required to hold direct item_links itself, or every such instrument
+    trips EMPTY_SCORING_CONSTRUCTS despite full item coverage."""
+    instrument = (
+        await client.post(
+            "/api/v1/instruments", json={"name": "CENSOPAS jerarquía test", "is_system": False}
+        )
+    ).json()
+    version = (
+        await client.post(
+            f"/api/v1/instruments/{instrument['id']}/versions",
+            json={
+                "version_code": "V1",
+                "status": "DRAFT",
+                "config": {"censopas_version_kind": "MEDIUM"},
+            },
+        )
+    ).json()
+
+    variable = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/structure-variables",
+            json={"code": "CENSOPAS", "name": "CENSOPAS", "role": "OUTCOME"},
+        )
+    ).json()
+    dimension = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/constructs",
+            json={
+                "parent_id": variable["id"],
+                "code": "D1",
+                "name": "Exigencias psicológicas",
+                "construct_type": "DIMENSION",
+            },
+        )
+    ).json()
+    subdimension = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/constructs",
+            json={
+                "parent_id": dimension["id"],
+                "code": "S1",
+                "name": "Ritmo de trabajo",
+                "construct_type": "SUBDIMENSION",
+            },
+        )
+    ).json()
+
+    item = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/items",
+            json={
+                "code": "P1",
+                "question_text": "Ritmo de trabajo",
+                "question_type": "LIKERT",
+                "is_scored": True,
+            },
+        )
+    ).json()
+    link_resp = await client.post(
+        f"/api/v1/constructs/{subdimension['id']}/items",
+        json={"question_id": item["id"], "weight": 1, "scoring_direction": "DIRECT"},
+    )
+    assert link_resp.status_code == 201, link_resp.text
+    await client.post(
+        f"/api/v1/instrument-versions/{version['id']}/scoring-rules",
+        json={
+            "question_id": item["id"],
+            "parameters": {"map": {"1": 0, "2": 25, "3": 50, "4": 75, "5": 100}},
+            "status": "VALIDATED",
+        },
+    )
+
+    readiness_resp = await client.get(
+        f"/api/v1/instrument-versions/{version['id']}/censopas/readiness"
+    )
+    assert readiness_resp.status_code == 200, readiness_resp.text
+    body = readiness_resp.json()
+    assert "EMPTY_SCORING_CONSTRUCTS" not in body["errors"]

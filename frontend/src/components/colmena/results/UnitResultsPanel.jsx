@@ -5,17 +5,20 @@ import { Calculator, PlusCircle, ShieldAlert, ShieldCheck, Users } from 'lucide-
 import {
   createStudyUnit,
   createStudyUnitType,
+  getCensopasResults,
   getCensopasUnitResults,
   getStudy,
   listStudyUnitTypes,
   listStudyUnits,
   runCensopasScoring,
 } from '../../../api/studies.js';
+import { getCensopasReadiness } from '../../../api/instruments.js';
 import { formatNumber } from '../../../utils/format.js';
 import { Button } from '../../ui/Button.jsx';
 import { Card } from '../../ui/Card.jsx';
 import { EmptyState } from '../../ui/EmptyState.jsx';
 import { LoadingState } from '../../ui/LoadingState.jsx';
+import CensopasReadinessPanel from '../instruments/CensopasReadinessPanel.jsx';
 
 const SUPPRESSION_LABELS = {
   BELOW_MINIMUM_N: 'unidad con menos de {n} respuestas válidas',
@@ -133,7 +136,12 @@ export default function UnitResultsPanel({ studyId }) {
       ) : isDraft ? (
         <UnitsConfigPanel unitTypeId={Number(unitTypeId)} />
       ) : (
-        <UnitResultsTable studyId={studyId} unitTypeId={Number(unitTypeId)} minPublishableN={study.min_publishable_n} />
+        <UnitResultsTable
+          studyId={studyId}
+          unitTypeId={Number(unitTypeId)}
+          minPublishableN={study.min_publishable_n}
+          instrumentVersionId={study.instrument_version_id}
+        />
       )}
     </div>
   );
@@ -256,7 +264,7 @@ function UnitsConfigPanel({ unitTypeId }) {
   );
 }
 
-function UnitResultsTable({ studyId, unitTypeId, minPublishableN }) {
+function UnitResultsTable({ studyId, unitTypeId, minPublishableN, instrumentVersionId }) {
   const queryClient = useQueryClient();
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['censopasUnitResults', studyId, unitTypeId],
@@ -265,9 +273,27 @@ function UnitResultsTable({ studyId, unitTypeId, minPublishableN }) {
     retry: false,
   });
 
+  const { data: readiness, isFetching: isLoadingReadiness } = useQuery({
+    queryKey: ['censopas-readiness', instrumentVersionId],
+    queryFn: () => getCensopasReadiness(instrumentVersionId),
+    enabled: Boolean(instrumentVersionId),
+    retry: false,
+  });
+  const readyForScoring = Boolean(readiness?.ready_for_scoring);
+
   const scoringMutation = useMutation({
     mutationFn: () => runCensopasScoring(studyId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['censopasUnitResults', studyId, unitTypeId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['censopasUnitResults', studyId, unitTypeId] });
+      queryClient.invalidateQueries({ queryKey: ['censopasResults', studyId] });
+    },
+  });
+
+  const { data: globalResults } = useQuery({
+    queryKey: ['censopasResults', studyId],
+    queryFn: () => getCensopasResults(studyId),
+    enabled: Boolean(studyId),
+    retry: false,
   });
 
   const results = data?.results || [];
@@ -280,12 +306,37 @@ function UnitResultsTable({ studyId, unitTypeId, minPublishableN }) {
 
   return (
     <Card>
+      {instrumentVersionId ? (
+        <div className="mb-4">
+          <CensopasReadinessPanel readiness={readiness} isLoading={isLoadingReadiness} />
+        </div>
+      ) : null}
+
+      {globalResults?.scoring_status ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surfaceSoft px-3 py-2 text-xs text-muted">
+          <span>
+            Estado del scoring oficial: <strong className="text-dark">{globalResults.scoring_status}</strong>
+          </span>
+          <span>·</span>
+          <span>
+            Equivalencia oficial: <strong className="text-dark">{globalResults.official_equivalence_enabled ? 'habilitada' : 'deshabilitada'}</strong>
+          </span>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 rounded-xl bg-turquoiseSoft px-3 py-2 text-xs font-semibold text-turquoiseDark">
           <ShieldCheck size={15} />
           Umbral n ≥ {data?.min_publishable_n ?? minPublishableN}
         </div>
-        <Button variant="primary" size="sm" onClick={() => scoringMutation.mutate()} loading={scoringMutation.isPending}>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => scoringMutation.mutate()}
+          loading={scoringMutation.isPending}
+          disabled={Boolean(instrumentVersionId) && !readyForScoring}
+          title={instrumentVersionId && !readyForScoring ? 'Resuelve el checklist de preparación CENSOPAS de arriba antes de calcular.' : undefined}
+        >
           <Calculator size={15} className="mr-1" /> Calcular resultados CENSOPAS
         </Button>
       </div>

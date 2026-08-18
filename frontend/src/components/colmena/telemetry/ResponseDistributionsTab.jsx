@@ -3,6 +3,7 @@ import { BarChart3, Search } from 'lucide-react';
 
 import { Card } from '../../ui/Card.jsx';
 import { EmptyState } from '../../ui/EmptyState.jsx';
+import { displayLabel } from '../../../utils/labels.js';
 
 const GROUP_LABELS = {
   DIMENSION: 'Dimensión',
@@ -28,7 +29,7 @@ function QuestionCard({ question }) {
           </div>
           <div className="flex shrink-0 gap-2">
             <span className="rounded-lg bg-turquoiseSoft px-2 py-1 text-[10px] font-bold text-turquoiseDark">
-              {question.measurement_level}
+              {displayLabel(question.measurement_level)}
             </span>
             <span className="rounded-lg bg-amber/10 px-2 py-1 text-[10px] font-bold text-yellowDark">
               n = {question.valid_n}

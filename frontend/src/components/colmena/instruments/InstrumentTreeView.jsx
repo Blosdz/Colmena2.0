@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight, FileQuestion, Layers3, Plus } from 'lucide-react';
 
 import { Button } from '../../ui/Button.jsx';
+import { displayLabel } from '../../../utils/labels.js';
 
 function QuestionRow({ item, construct, onEditItem }) {
   return (
@@ -94,7 +95,7 @@ export default function InstrumentTreeView({
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surfaceSoft/60 px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-dark">{selected.name}</p>
-              <p className="mt-0.5 text-xs text-muted">{selected.code} · {selected.role}</p>
+              <p className="mt-0.5 text-xs text-muted">{selected.code} · {displayLabel(selected.role)}</p>
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" size="sm" onClick={() => onAddDimension(selected)}>

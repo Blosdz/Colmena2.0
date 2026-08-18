@@ -93,7 +93,7 @@ class BaremBandGenerate(BaseModel):
     construct_ids: list[int] | None = None
     levels: Literal[3, 5] = 3
     labels: list[str] | None = None
-    direction: Direction = "HIGHER_BETTER"
+    direction: Direction
     method: Literal["EQUAL_INTERVAL", "QUANTILES"] = "EQUAL_INTERVAL"
     study_id: int | None = None
 

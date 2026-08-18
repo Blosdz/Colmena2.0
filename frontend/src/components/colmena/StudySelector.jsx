@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { listStudies } from '../../api/studies.js';
+import { displayLabel } from '../../utils/labels.js';
 
 /**
  * Simplificado a sólo-estudio: el proyecto ya viene de la URL
@@ -25,7 +26,7 @@ export default function StudySelector({ projectId, studyId, onStudyChange }) {
         <option value="">Selecciona un estudio</option>
         {studies.map((study) => (
           <option key={study.id} value={study.id}>
-            {study.name} ({study.status})
+            {study.name} ({displayLabel(study.status)})
           </option>
         ))}
       </select>

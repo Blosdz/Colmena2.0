@@ -56,374 +56,6 @@ _CONFIDENTIALITY_NOTICE = (
 )
 
 
-def _trichotomy_lines(results: list[dict], min_publishable_n: int | None) -> list[str]:
-    """Fase 11: misma fuente y mismos campos que la tabla DOCX
-    (`favorable/intermediate/unfavorable_pct` + n válido + clasificación
-    colectiva) — antes el PDF usaba menos campos que el DOCX, esto cierra
-    GAP-REPORT-PDF-PARITY para D1-D6/S1-S20."""
-    lines = []
-    for result in results:
-        code = result.get("construct_code") or "—"
-        name = result.get("construct_name") or "—"
-        if result.get("suppressed"):
-            hidden = f"Oculto (n<{min_publishable_n})" if min_publishable_n else "Oculto"
-            lines.append(f"{code} · {name} · {hidden}")
-            continue
-        classification = _CLASSIFICATION_LABELS_PDF.get(
-            result.get("collective_classification"), result.get("collective_classification") or "—"
-        )
-        lines.append(
-            f"{code} · {name} · Favorable {result.get('favorable_n', '—')} "
-            f"({_pct(result.get('favorable_pct'))}) · Intermedio {result.get('intermediate_n', '—')} "
-            f"({_pct(result.get('intermediate_pct'))}) · Desfavorable {result.get('unfavorable_n', '—')} "
-            f"({_pct(result.get('unfavorable_pct'))}) · n válido={result.get('n_valid', '—')} · "
-            f"clasificación={classification}"
-        )
-    return lines
-
-
-def _pct(value: float | None) -> str:
-    return f"{value:.1f}%" if value is not None else "—"
-
-
-_CLASSIFICATION_LABELS_PDF = {
-    "RIESGO_ALTO": "Riesgo alto",
-    "FACTOR_PROTECTOR": "Factor protector",
-    "RIESGO_MEDIO": "Riesgo medio",
-    "REVISION": "Requiere revisión",
-}
-
-
-def _render_report_pdf(bundle: dict) -> bytes:
-    """Render PDF multipágina desde el mismo bundle, sin datos individuales.
-    Fase 11: mismas secciones metodológicas que el DOCX — el layout es texto
-    plano por página, pero el contenido (perfil sociolaboral, D1-D6/S1-S20
-    separados, interpretación, priorización, plan preventivo completo,
-    conclusiones) es semánticamente equivalente."""
-    import io
-    import textwrap
-
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-
-    output = io.BytesIO()
-    selected_sections = set(bundle.get("sections") or [])
-    pages_rendered = 0
-
-    def add_page(pdf, title: str, lines: list[str], section_keys: set[str] | None) -> None:
-        nonlocal pages_rendered
-        if section_keys is not None and selected_sections and not selected_sections.intersection(section_keys):
-            return
-        pages_rendered += 1
-        figure = plt.figure(figsize=(8.27, 11.69), dpi=120)
-        figure.patch.set_facecolor("white")
-        figure.text(0.08, 0.94, title, fontsize=18, fontweight="bold", color="#1C1F24")
-        y = 0.89
-        for line in lines:
-            wrapped = textwrap.wrap(str(line), width=105) or [""]
-            for part in wrapped:
-                figure.text(0.08, y, part, fontsize=9.5, color="#374151")
-                y -= 0.024
-            y -= 0.008
-            if y < 0.08:
-                break
-        figure.text(0.08, 0.035, "Colmena · CENSOPAS-COPSOQ", fontsize=8, color="#6B7280")
-        pdf.savefig(figure, bbox_inches="tight")
-        plt.close(figure)
-
-    with PdfPages(output) as pdf:
-        study = bundle.get("study") or {}
-        cover = bundle.get("cover") or {}
-        label = bundle.get("methodological_label") or {}
-        equivalence_line = (
-            "Equivalente al resultado oficial CENSOPAS-COPSOQ"
-            if label.get("official_equivalence")
-            else "No equivalente al resultado oficial CENSOPAS-COPSOQ"
-        )
-        add_page(
-            pdf,
-            study.get("name") or "Reporte",
-            [
-                f"{label.get('label', 'Baremo de referencia')} — {equivalence_line}",
-                f"Instrumento: {cover.get('instrument_label') or 'CENSOPAS-COPSOQ'} · "
-                f"Versión: {cover.get('version_kind') or 'UNKNOWN'}",
-                f"Organización: {cover.get('organization_name') or '—'}",
-                f"Código del estudio: {cover.get('study_code') or '—'}",
-                f"Período: {cover.get('period_start') or '—'} – {cover.get('period_end') or '—'}",
-                f"Evaluador/responsable: {cover.get('evaluator_label') or '—'}",
-                f"Generado: {bundle.get('generated_at', '—')}",
-                cover.get("confidentiality_notice") or "",
-            ],
-            {"portada"},
-        )
-        summary = bundle.get("executive_summary") or {}
-        summary_lines = [summary.get("headline") or "Sin datos suficientes para un resumen."]
-        if summary.get("n_valid") is not None:
-            summary_lines.append(f"Respuestas válidas: {summary['n_valid']}")
-        if summary.get("completion_rate") is not None:
-            summary_lines.append(f"Tasa de finalización: {summary['completion_rate'] * 100:.1f}%")
-        summary_lines.append(
-            f"Baremo: {summary.get('barem_status') or '—'} · "
-            f"Equivalencia oficial: {'sí' if summary.get('official_equivalence') else 'no'}"
-        )
-        for dimension in summary.get("priority_dimensions") or []:
-            dim_label = dimension.get("construct_name") or dimension.get("construct_code") or "—"
-            pct = dimension.get("unfavorable_pct")
-            pct_label = f"{pct:.1f}%" if pct is not None else "—"
-            summary_lines.append(
-                f"Prioritaria: {dim_label} · {pct_label} desfavorable · {dimension.get('classification') or '—'}"
-            )
-        add_page(pdf, "Resumen ejecutivo", summary_lines, {"resumen_ejecutivo"})
-
-        readiness = bundle.get("methodological_status") or {}
-        add_page(
-            pdf,
-            "Estado metodológico",
-            [
-                f"Versión: {readiness.get('version_kind', 'UNKNOWN')}",
-                f"Listo para scoring: {readiness.get('ready_for_scoring', False)}",
-                f"Baremo: {label.get('label', 'Baremo de referencia')}. {equivalence_line}.",
-                "Bloqueos: " + ", ".join(readiness.get("errors", [])),
-                "Advertencias: " + ", ".join(readiness.get("warnings", [])),
-            ],
-            {"trazabilidad", "ficha_tecnica"},
-        )
-
-        data_quality = bundle.get("data_quality") or {}
-        traceability = bundle.get("traceability") or {}
-        min_publishable_n = (traceability.get("privacy") or {}).get("min_publishable_n")
-        barem_trace = traceability.get("barem") or {}
-        add_page(
-            pdf,
-            "Ficha técnica",
-            [
-                f"Instrumento: {study.get('instrument_name') or 'CENSOPAS-COPSOQ'}",
-                f"Versión del instrumento: {study.get('instrument_version_code') or '—'}",
-                "Población convocada: No disponible en el sistema (sin registro de convocatoria)",
-                f"Respondieron (sesiones iniciadas): {data_quality.get('started_count', '—')}",
-                f"Válidos: {data_quality.get('valid_count', '—')}",
-                f"Excluidos: {data_quality.get('excluded_count', '—')}",
-                "Tasa válida: " + _format_percentage_pdf(data_quality.get("completion_rate")),
-                f"Baremo aplicado: {barem_trace.get('name') or '—'}",
-                f"Equivalencia oficial: {'habilitada' if label.get('official_equivalence') else 'no habilitada'}",
-                f"N mínimo publicable: {min_publishable_n if min_publishable_n is not None else '—'}",
-            ],
-            {"ficha_tecnica"},
-        )
-
-        add_page(
-            pdf,
-            "Calidad de datos",
-            [
-                f"Sesiones iniciadas: {data_quality.get('started_count', '—')}",
-                f"Completadas: {data_quality.get('completed_count', '—')}",
-                f"Válidas: {data_quality.get('valid_count', '—')}",
-                f"Abandonadas: {data_quality.get('abandoned_count', '—')}",
-                f"En revisión: {data_quality.get('review_count', '—')}",
-                f"Excluidas: {data_quality.get('excluded_count', '—')}",
-                "Tasa de finalización: " + _format_percentage_pdf(data_quality.get("completion_rate")),
-            ]
-            if data_quality
-            else ["Todavía no hay telemetría persistida para este estudio."],
-            {"calidad_datos"},
-        )
-
-        sociolaboral_lines = []
-        for question in bundle.get("sociolaboral_profile") or []:
-            for category in question.get("categories") or []:
-                if category.get("suppressed"):
-                    sociolaboral_lines.append(
-                        f"{question.get('label')} · {category.get('label')} · Oculto (n<{min_publishable_n})"
-                    )
-                else:
-                    sociolaboral_lines.append(
-                        f"{question.get('label')} · {category.get('label')} · "
-                        f"n={category.get('n')} ({_pct(category.get('percentage'))})"
-                    )
-        add_page(
-            pdf,
-            "Perfil sociolaboral",
-            sociolaboral_lines
-            or ["Este estudio no tiene variables sociolaborales descriptivas provisionadas."],
-            {"variables_descriptivas"},
-        )
-
-        dimension_results = bundle.get("dimension_results") or []
-        add_page(
-            pdf,
-            "Resultados por dimensión (D1-D6)",
-            _trichotomy_lines(dimension_results, min_publishable_n)
-            or ["Este estudio todavía no tiene resultados por dimensión calculados."],
-            {"dimensiones", "resultados_globales"},
-        )
-
-        if cover.get("version_kind") == "MEDIUM":
-            subdimension_results = bundle.get("subdimension_results") or []
-            add_page(
-                pdf,
-                "Resultados por subdimensión (S1-S20)",
-                _trichotomy_lines(subdimension_results, min_publishable_n)
-                or ["Este estudio todavía no tiene resultados por subdimensión calculados."],
-                {"subdimensiones"},
-            )
-
-        interpretation_lines = []
-        for entry in bundle.get("interpretation") or []:
-            interpretation_lines.append(
-                f"{entry.get('construct_name') or entry.get('construct_code') or '—'} — "
-                f"Hallazgo: {entry.get('finding') or '—'}"
-            )
-            if entry.get("classification"):
-                interpretation_lines.append(f"  Clasificación: {entry['classification']}")
-            hypotheses = entry.get("origin_hypothesis") or []
-            interpretation_lines.append(
-                "  Hipótesis de origen a contrastar: "
-                + ("; ".join(hypotheses) if hypotheses else "sin registrar todavía.")
-            )
-            orientations = entry.get("preventive_orientation") or []
-            interpretation_lines.append(
-                "  Orientación preventiva: " + ("; ".join(orientations) if orientations else "—")
-            )
-            interpretation_lines.append(f"  Limitación: {entry.get('limitation') or '—'}")
-        add_page(
-            pdf,
-            "Interpretación de resultados",
-            interpretation_lines or ["Sin resultados publicables todavía para interpretar."],
-            {"dimensiones", "resultados_globales", "subdimensiones"},
-        )
-
-        priority_lines = [
-            "El siguiente orden es una ayuda de priorización preventiva calculada por el "
-            "backend; no es una clasificación oficial adicional de CENSOPAS-COPSOQ."
-        ]
-        for row in bundle.get("priority_ranking") or []:
-            priority_lines.append(
-                f"#{row.get('priority_rank') or '—'} · {row.get('construct_code') or ''} "
-                f"{row.get('construct_name') or '—'} · {_pct(row.get('unfavorable_pct'))} desfavorable · "
-                f"n={row.get('n_valid') or '—'}"
-            )
-        add_page(
-            pdf,
-            "Priorización preventiva",
-            priority_lines,
-            {"dimensiones", "resultados_globales", "subdimensiones"},
-        )
-
-        analysis_lines = [
-            f"{result.get('result_code') or '—'} · {result.get('result_type', '—')} · "
-            f"n={result.get('n_valid', '—')} · p={result.get('p_value', '—')}"
-            for result in (bundle.get("analysis_results") or [])[:50]
-        ]
-        if analysis_lines:
-            add_page(pdf, "Resultados de análisis estadístico", analysis_lines, {"hallazgos_premium"})
-
-        premium = bundle.get("premium_analytics") or {}
-        premium_lines = [
-            f"Estado: {premium.get('status') or 'NO_RESULTS'}",
-            "Métodos: " + (", ".join(premium.get("methods") or []) or "—"),
-            f"Resultados publicables: {premium.get('result_count', 0)}",
-            f"Resultados significativos: {premium.get('significant_result_count', 0)}",
-        ]
-        for result in (premium.get("results") or [])[:50]:
-            premium_lines.append(
-                f"{result.get('result_code') or '—'} · {result.get('result_type') or '—'} · "
-                f"n={result.get('n_valid') or '—'} · p={result.get('adjusted_p_value') or result.get('p_value') or '—'}"
-            )
-        premium_lines.extend(premium.get("limitations") or [])
-        add_page(pdf, "Analítica premium", premium_lines, {"hallazgos_premium"})
-
-        action_lines = []
-        for plan in bundle.get("action_plans") or []:
-            action_lines.append(
-                f"{plan.get('name') or 'Plan de acción'} · estado={plan.get('status') or '—'} · "
-                f"{'aprobado' if plan.get('approved') else 'pendiente de aprobación'}"
-            )
-            for item in plan.get("items") or []:
-                action_lines.append(
-                    f"P{item.get('priority') or '—'} · {item.get('construct_code') or '—'} · "
-                    f"hallazgo={item.get('finding') or '—'} · "
-                    f"hipótesis={item.get('origin_hypothesis') or '—'}"
-                )
-                action_lines.append(
-                    f"  medida={item.get('action_description') or item.get('title') or '—'} · "
-                    f"responsable={item.get('responsible_label') or '—'} · fecha={item.get('due_date') or '—'} · "
-                    f"estado={item.get('effective_status') or item.get('status') or '—'}"
-                )
-                for kpi in item.get("kpis") or []:
-                    current = kpi.get("current_value")
-                    if current is None:
-                        latest = kpi.get("latest_measurement") or {}
-                        current = latest.get("text_value") or "sin medición"
-                    action_lines.append(
-                        f"  KPI {kpi.get('code') or '—'}: {kpi.get('name') or '—'} · "
-                        f"línea base={kpi.get('baseline_value') if kpi.get('baseline_value') is not None else '—'} · "
-                        f"actual={current} · meta={kpi.get('target_value') if kpi.get('target_value') is not None else '—'} · "
-                        f"unidad={kpi.get('unit') or '—'}"
-                    )
-        add_page(
-            pdf,
-            "Plan de acción",
-            action_lines or ["No hay planes de acción registrados para este estudio."],
-            {"plan_accion"},
-        )
-
-        add_page(
-            pdf,
-            "Conclusiones",
-            bundle.get("conclusions") or ["Sin datos suficientes para conclusiones todavía."],
-            {"conclusiones", "resumen_ejecutivo"},
-        )
-
-        barem = traceability.get("barem") or {}
-        trace_lines = [
-            f"report_run_id: {traceability.get('report_run_id') or '—'}",
-            f"study_id: {traceability.get('study_id') or '—'} · código: {traceability.get('study_code') or '—'}",
-            f"analysis_run_id: {traceability.get('analysis_run_id') or '—'}",
-            f"Versión: {traceability.get('version_kind') or '—'}",
-            f"instrument_version_id: {traceability.get('instrument_version_id') or '—'}",
-            f"Hash del manifiesto: {traceability.get('manifest_hash') or '—'}",
-            "Linaje: " + " → ".join(traceability.get("lineage") or []),
-            f"Baremo: {barem.get('name') or '—'} · versión {barem.get('version') or '—'} · "
-            f"id={barem.get('id') or '—'} · estado={barem.get('type') or '—'}",
-            f"Hash del baremo: {barem.get('content_hash') or '—'}",
-            f"Equivalencia oficial: {'sí' if traceability.get('official_equivalence') else 'no'}",
-            "Registros individuales incluidos: no",
-        ]
-        exclusions = traceability.get("exclusions") or {}
-        if exclusions:
-            trace_lines.append(
-                f"Exclusiones: excluidas={exclusions.get('excluded_count') or 0} · "
-                f"abandonadas={exclusions.get('abandoned_count') or 0} · "
-                f"en revisión={exclusions.get('review_count') or 0} — {exclusions.get('criteria') or ''}"
-            )
-        for run in traceability.get("analysis_runs") or []:
-            trace_lines.append(
-                f"Ejecución {run.get('analysis_type') or '—'} · estado={run.get('status') or '—'} · "
-                f"algoritmo={run.get('algorithm_version') or '—'} · hash={run.get('input_hash') or '—'}"
-            )
-        add_page(pdf, "Anexos y trazabilidad", trace_lines, {"anexos", "trazabilidad"})
-
-        if pages_rendered == 0:
-            add_page(
-                pdf,
-                "Secciones seleccionadas",
-                [
-                    "Las secciones solicitadas aún no tienen contenido disponible "
-                    "para este estudio.",
-                    "Selección: " + ", ".join(bundle.get("sections") or []),
-                ],
-                None,
-            )
-
-    return output.getvalue()
-
-
-def _format_percentage_pdf(ratio: float | None) -> str:
-    if ratio is None:
-        return "—"
-    return f"{ratio * 100:.1f}%"
-
-
 class ReportService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -492,7 +124,14 @@ class ReportService:
                 path = storage_dir / f"{report_run.public_id}.docx"
                 path.write_bytes(file_bytes)
             elif payload.output_format == "PDF":
-                file_bytes = _render_report_pdf(bundle)
+                # El PDF nunca se renderiza aparte: siempre es una conversión
+                # del mismo DOCX (LibreOffice headless), para que el layout
+                # entregado en PDF y en Word coincida por construcción.
+                from app.services.report_docx import render_report_docx
+                from app.services.report_pdf_convert import docx_to_pdf
+
+                docx_bytes = render_report_docx(bundle)
+                file_bytes = await docx_to_pdf(docx_bytes)
                 path = storage_dir / f"{report_run.public_id}.pdf"
                 path.write_bytes(file_bytes)
             else:
@@ -514,6 +153,29 @@ class ReportService:
         await self.session.commit()
         await self.session.refresh(report_run)
         return report_run
+
+    async def generate_preview(self, study_id: int, payload: ReportRunCreate) -> tuple:
+        """Genera el DOCX canónico (siempre, sin importar `output_format`
+        pedido) y deriva su PDF de preview convirtiéndolo con LibreOffice.
+
+        El PDF de preview se guarda como archivo hermano del `.docx`
+        (`{public_id}.pdf`, mismo `report_run`) en vez de agregar una
+        columna nueva a `ReportRun` — el path se puede derivar siempre por
+        convención desde `storage_path`. `GET /reports/{id}/download` sigue
+        sirviendo ese mismo `.docx` sin regenerar nada: es el archivo que
+        efectivamente se descarga al exportar.
+        """
+        from app.services.report_pdf_convert import count_pdf_pages, docx_to_pdf
+
+        forced_payload = payload.model_copy(update={"output_format": "DOCX"})
+        report_run = await self.generate(study_id, forced_payload)
+
+        docx_path = Path(report_run.storage_path)
+        pdf_bytes = await docx_to_pdf(docx_path.read_bytes())
+        pdf_path = docx_path.with_suffix(".pdf")
+        pdf_path.write_bytes(pdf_bytes)
+
+        return report_run, count_pdf_pages(pdf_bytes)
 
     async def _build_bundle(
         self,

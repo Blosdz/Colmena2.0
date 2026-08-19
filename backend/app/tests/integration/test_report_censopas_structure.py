@@ -7,20 +7,16 @@ from io import BytesIO
 
 from docx import Document
 from httpx import AsyncClient
+from pypdf import PdfReader
 
 from app.tests.integration.test_censopas_flow import _setup_censopas_study
 
-# El PDF (matplotlib) embebe el texto vía glyphs de una fuente subseteada,
-# no como literales ASCII en el content stream — ni siquiera con
-# `pdf.compression = 0` el texto queda buscable como substring sin un
-# parser de PDF completo (pypdf/pdfplumber, no instalados). Por eso estos
-# tests verifican el PDF solo estructuralmente (header válido, tamaño
-# variando con el contenido) y verifican paridad de contenido real
-# comparando DOCX vs JSON — ambos consumen exactamente las mismas
-# funciones del bundle (`_trichotomy_lines` etc.) que alimentan el PDF,
-# así que un DOCX/JSON correctos son evidencia fuerte de que el PDF
-# (mismo bundle, mismo builder de líneas) también lo es. Ver reporte de
-# auditoría POINT-5-REPORTS para la limitación documentada.
+# El PDF ya no es un renderer aparte: `ReportService.generate` siempre
+# renderiza el DOCX primero y lo convierte con LibreOffice headless
+# (`report_pdf_convert.docx_to_pdf`), así que el texto es real (no glyphs de
+# una fuente subseteada como con el matplotlib de antes) y se puede verificar
+# con `pypdf` como cualquier otro formato — ya no hace falta apoyarse
+# solamente en paridad DOCX/JSON para confiar en el contenido del PDF.
 
 
 async def _add_sociolaboral_question(client: AsyncClient, version_id: int, code: str):
@@ -53,6 +49,11 @@ def _docx_text(content: bytes) -> str:
     return "\n".join(paragraph.text for paragraph in document.paragraphs) + "\n".join(
         cell.text for table in document.tables for row in table.rows for cell in row.cells
     )
+
+
+def _pdf_text(content: bytes) -> str:
+    reader = PdfReader(BytesIO(content))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
 async def test_short_shows_dimensions_without_subdimensions(
@@ -381,11 +382,13 @@ async def test_docx_pdf_json_share_methodological_sections(
 
     docx_text = _docx_text((await _generate(client, study["id"], "DOCX")).content)
     pdf_download = await _generate(client, study["id"], "PDF")
+    pdf_text = _pdf_text(pdf_download.content)
     json_bundle = json.loads((await _generate(client, study["id"], "JSON")).text)
 
     assert pdf_download.content[:5] == b"%PDF-"
     for phrase in ["Perfil sociolaboral", "Priorización preventiva", "Conclusiones"]:
         assert phrase in docx_text, f"falta '{phrase}' en DOCX"
+        assert phrase in pdf_text, f"falta '{phrase}' en PDF"
     for key in ["sociolaboral_profile", "priority_ranking", "conclusions", "interpretation", "cover"]:
         assert key in json_bundle
     for key in ["priority_ranking", "conclusions", "interpretation", "cover"]:
@@ -410,3 +413,4 @@ async def test_suppressed_dimension_never_leaks_in_any_format(
 
     pdf_download = await _generate(client, study["id"], "PDF")
     assert pdf_download.content[:5] == b"%PDF-"
+    assert "Oculto" in _pdf_text(pdf_download.content)

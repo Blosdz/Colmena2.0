@@ -1,28 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Download, FileText, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Download, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
 
 import { useAuth } from '../../../auth/AuthContext.jsx';
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
 import { getProject } from '../../../api/projects.js';
 import { getStudy } from '../../../api/studies.js';
 import { getCensopasReadiness } from '../../../api/instruments.js';
-import { createReport, createReportTemplate, getReport, getReportDownloadUrl } from '../../../api/reports.js';
+import {
+  createReportPreview,
+  getReportDownloadUrl,
+  getReportPreviewPdfUrl,
+} from '../../../api/reports.js';
 
 import { PageHeader } from '../../../components/layout/PageHeader.jsx';
 import { Card } from '../../../components/ui/Card.jsx';
 import { Button } from '../../../components/ui/Button.jsx';
-import { PrimaryAction } from '../../../components/ui/PrimaryAction.jsx';
-import { StatusPill } from '../../../components/ui/StatusPill.jsx';
-import { EmptyState } from '../../../components/ui/EmptyState.jsx';
 import { LoadingState } from '../../../components/ui/LoadingState.jsx';
-import FormField from '../../../components/ui/FormField.jsx';
+import { EmptyState } from '../../../components/ui/EmptyState.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import StudySelector from '../../../components/colmena/StudySelector.jsx';
-import ReportWizardSteps from '../../../components/colmena/reports/ReportWizardSteps.jsx';
 import CensopasReadinessPanel from '../../../components/colmena/instruments/CensopasReadinessPanel.jsx';
-import { displayLabel } from '../../../utils/labels.js';
 
 const SECTIONS = [
   { key: 'portada', label: 'Portada' },
@@ -38,6 +37,7 @@ const SECTIONS = [
   { key: 'plan_accion', label: 'Plan de acción' },
   { key: 'anexos', label: 'Anexos' },
   { key: 'trazabilidad', label: 'Trazabilidad' },
+  { key: 'firmas', label: 'Firmas' },
 ];
 
 export default function ProjectReportsPage() {
@@ -45,14 +45,16 @@ export default function ProjectReportsPage() {
   const { user } = useAuth();
   useActiveProject(projectId);
 
-  const [step, setStep] = useState(0);
   const [studyId, setStudyId] = useState(null);
-  const [templateName, setTemplateName] = useState('Reporte estándar');
-  const [template, setTemplate] = useState(null);
   const [sections, setSections] = useState([]);
-  const [report, setReport] = useState(null);
   const [reportMode, setReportMode] = useState('PROVISIONAL');
   const [outputFormat, setOutputFormat] = useState('DOCX');
+  // Estado del preview (IDLE/GENERATING/READY/STALE/ERROR/EXPORTING) — la
+  // configuración con la que se generó el preview vigente vive aparte para
+  // poder compararla contra la actual y marcar STALE sin re-disparar nada.
+  const [previewState, setPreviewState] = useState('IDLE');
+  const [preview, setPreview] = useState(null);
+  const [generatedConfig, setGeneratedConfig] = useState(null);
 
   const { data: project, isLoading: isLoadingProject } = useQuery({
     queryKey: ['project', projectId],
@@ -71,77 +73,73 @@ export default function ProjectReportsPage() {
     enabled: Boolean(study?.instrument_version_id),
   });
 
-  const createTemplateMutation = useMutation({
-    mutationFn: () => createReportTemplate({
-      name: templateName,
-      report_type: 'CENSOPAS_COPSOQ',
-      instrument_version_id: study?.instrument_version_id,
-      template_config: { methodology: 'CENSOPAS_COPSOQ' },
-    }),
-    onSuccess: (data) => {
-      setTemplate(data);
-      setStep(2);
-    },
-  });
+  const currentConfig = { studyId, sections: [...sections].sort(), reportMode, outputFormat };
 
-  const createReportMutation = useMutation({
+  const previewMutation = useMutation({
     mutationFn: () =>
-      createReport(studyId, { report_template_id: template.id, output_format: outputFormat, requested_by_user_id: user.id, report_mode: reportMode, sections }),
-    onSuccess: (data) => setReport(data),
+      createReportPreview(studyId, {
+        requested_by_user_id: user.id,
+        report_mode: reportMode,
+        output_format: outputFormat,
+        sections,
+      }),
+    onMutate: () => setPreviewState('GENERATING'),
+    onSuccess: (data) => {
+      setPreview(data);
+      setGeneratedConfig(currentConfig);
+      setPreviewState('READY');
+    },
+    onError: () => setPreviewState('ERROR'),
   });
 
-  const { data: reportStatus } = useQuery({
-    queryKey: ['report', report?.id],
-    queryFn: () => getReport(report.id),
-    enabled: Boolean(report?.id),
-    refetchInterval: (query) => (query.state.data && ['COMPLETED', 'FAILED'].includes(query.state.data.status) ? false : 1500),
-  });
+  useEffect(() => {
+    if (previewState === 'READY' && generatedConfig && JSON.stringify(generatedConfig) !== JSON.stringify(currentConfig)) {
+      setPreviewState('STALE');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyId, sections, reportMode, outputFormat]);
 
   const toggleSection = (key) => {
     setSections((prev) => (prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key]));
   };
 
+  const resetPreview = () => {
+    setPreview(null);
+    setGeneratedConfig(null);
+    setPreviewState('IDLE');
+  };
+
   if (isLoadingProject) return <LoadingState label="Cargando..." />;
   if (!project) return <ProjectMissingState />;
+
+  const canExport = previewState === 'READY' && preview;
+  const exportUrl = preview
+    ? outputFormat === 'PDF'
+      ? getReportPreviewPdfUrl(preview.preview_id)
+      : getReportDownloadUrl(preview.preview_id)
+    : null;
 
   return (
     <div className="colmena-page">
       <PageHeader eyebrow="Reportes" title={project.name} description="Genera reportes estructurados a partir de los análisis del estudio." />
 
-      <Card>
-        <ReportWizardSteps current={step} />
-      </Card>
-
-      <Card>
-        {step === 0 ? (
-          <div className="flex flex-col gap-4">
-            <StudySelector projectId={projectId} studyId={studyId} onStudyChange={setStudyId} />
-            {studyId ? (
-              <CensopasReadinessPanel readiness={readiness} isLoading={isLoadingReadiness} />
-            ) : null}
-            <Button variant="primary" size="sm" onClick={() => setStep(1)} disabled={!studyId} className="w-40">
-              Continuar
-            </Button>
+      <div className="grid gap-4 md:grid-cols-[360px_1fr]">
+        <Card className="flex flex-col gap-5">
+          <div className="flex flex-col gap-3">
+            <p className="colmena-label">Estudio</p>
+            <StudySelector
+              projectId={projectId}
+              studyId={studyId}
+              onStudyChange={(value) => {
+                setStudyId(value);
+                resetPreview();
+              }}
+            />
+            {studyId ? <CensopasReadinessPanel readiness={readiness} isLoading={isLoadingReadiness} /> : null}
           </div>
-        ) : null}
 
-        {step === 1 ? (
-          <div className="flex flex-col gap-4">
-            <FormField label="Nombre de la plantilla" value={templateName} onChange={(event) => setTemplateName(event.target.value)} />
-            <div className="flex gap-3">
-              <Button variant="secondary" size="sm" onClick={() => setStep(0)}>
-                Atrás
-              </Button>
-              <Button variant="primary" size="sm" onClick={() => createTemplateMutation.mutate()} loading={createTemplateMutation.isPending}>
-                Crear plantilla y continuar
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {step === 2 ? (
-          <div className="flex flex-col gap-4">
-            <p className="colmena-label">Secciones a incluir</p>
+          <div>
+            <p className="colmena-label mb-2">Secciones a incluir</p>
             <div className="flex flex-wrap gap-2">
               {SECTIONS.map((section) => (
                 <button
@@ -154,111 +152,114 @@ export default function ProjectReportsPage() {
                 </button>
               ))}
             </div>
-            <div className="flex gap-3">
-              <Button variant="secondary" size="sm" onClick={() => setStep(1)}>
-                Atrás
-              </Button>
-              <Button variant="primary" size="sm" onClick={() => setStep(3)} disabled={sections.length === 0}>
-                Continuar
-              </Button>
+          </div>
+
+          <div>
+            <p className="colmena-label mb-2">Nivel metodológico</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setReportMode('PROVISIONAL')}
+                className={'rounded-xl border p-3 text-left ' + (reportMode === 'PROVISIONAL' ? 'border-amber bg-amber/5' : 'border-border bg-surface')}
+              >
+                <FileText size={16} className="mb-1.5 text-amber" />
+                <span className="block text-xs font-semibold text-dark">Provisional</span>
+              </button>
+              <button
+                type="button"
+                disabled={!readiness?.ready_for_official_reporting}
+                onClick={() => setReportMode('OFFICIAL')}
+                className={'rounded-xl border p-3 text-left ' + (reportMode === 'OFFICIAL' ? 'border-turquoise bg-turquoise/5' : 'border-border bg-surface') + ' disabled:cursor-not-allowed disabled:opacity-50'}
+              >
+                <ShieldCheck size={16} className="mb-1.5 text-turquoise" />
+                <span className="block text-xs font-semibold text-dark">Oficial</span>
+              </button>
             </div>
           </div>
-        ) : null}
 
-        {step === 3 ? (
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-muted">
-              Este estudio requiere un mínimo de <strong className="text-dark">{study?.min_publishable_n ?? '—'}</strong> respuestas
-              válidas por celda para publicar resultados desagregados. El backend aplica esta regla de privacidad al generar el
-              reporte — el frontend no la calcula ni la puede saltar.
-            </p>
-            <div className="flex gap-3">
-              <Button variant="secondary" size="sm" onClick={() => setStep(2)}>
-                Atrás
-              </Button>
-              <Button variant="primary" size="sm" onClick={() => setStep(4)}>
-                Continuar
-              </Button>
-            </div>
+          <div>
+            <label className="colmena-label mb-2 block" htmlFor="report-output-format">Formato de salida</label>
+            <select
+              id="report-output-format"
+              className="colmena-input w-full"
+              value={outputFormat}
+              onChange={(event) => setOutputFormat(event.target.value)}
+            >
+              <option value="DOCX">Word (.docx)</option>
+              <option value="PDF">PDF (.pdf)</option>
+            </select>
           </div>
-        ) : null}
 
-        {step === 4 ? (
-          <div className="flex flex-col gap-4">
-            {!report ? (
-              <>
-                <p className="text-sm text-muted">
-                  Elige el estatus metodológico del documento. El backend volverá a validar readiness antes de crear una salida oficial.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => setReportMode('PROVISIONAL')}
-                    className={'rounded-xl border p-4 text-left ' + (reportMode === 'PROVISIONAL' ? 'border-amber bg-amber/5' : 'border-border bg-surface')}
-                  >
-                    <FileText size={18} className="mb-2 text-amber" />
-                    <span className="block text-sm font-semibold text-dark">Reporte provisional</span>
-                    <span className="mt-1 block text-xs text-muted">Disponible para pruebas; se rotula sin equivalencia oficial.</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!readiness?.ready_for_official_reporting}
-                    onClick={() => setReportMode('OFFICIAL')}
-                    className={'rounded-xl border p-4 text-left ' + (reportMode === 'OFFICIAL' ? 'border-turquoise bg-turquoise/5' : 'border-border bg-surface') + ' disabled:cursor-not-allowed disabled:opacity-50'}
-                  >
-                    <ShieldCheck size={18} className="mb-2 text-turquoise" />
-                    <span className="block text-sm font-semibold text-dark">Reporte oficial</span>
-                    <span className="mt-1 block text-xs text-muted">Requiere manifiesto, scoring, baremo y equivalencia habilitados.</span>
-                  </button>
-                </div>
-                <div className="max-w-xs">
-                  <label className="colmena-label mb-2 block" htmlFor="report-output-format">Formato de salida</label>
-                  <select
-                    id="report-output-format"
-                    className="colmena-input w-full"
-                    value={outputFormat}
-                    onChange={(event) => setOutputFormat(event.target.value)}
-                  >
-                    <option value="DOCX">Word (.docx)</option>
-                    <option value="PDF">PDF (.pdf)</option>
-                  </select>
-                </div>
-                <div className="flex gap-3">
-                  <Button variant="secondary" size="sm" onClick={() => setStep(3)}>
-                    Atrás
-                  </Button>
-                  <PrimaryAction onClick={() => createReportMutation.mutate()} loading={createReportMutation.isPending}>
-                    <FileText size={16} className="mr-1" />
-                    Generar {reportMode === 'OFFICIAL' ? 'reporte oficial' : 'reporte provisional'}
-                  </PrimaryAction>
-                </div>
-                {createReportMutation.isError ? <p className="text-sm font-medium text-danger">No pudimos generar el reporte.</p> : null}
-              </>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <StatusPill label={displayLabel(reportStatus?.status || report.status)} tone="report" />
-                  {reportStatus?.error_message ? <span className="text-sm text-danger">{reportStatus.error_message}</span> : null}
-                </div>
-                {reportStatus?.status === 'COMPLETED' ? (
-                  <a href={getReportDownloadUrl(report.id)} target="_blank" rel="noreferrer" className="colmena-button-primary w-56">
-                    <Download size={16} className="mr-2" />
-                    Descargar {reportStatus?.output_format === 'PDF' ? 'PDF' : 'Word'}
-                  </a>
-                ) : (
-                  <LoadingState label="Generando..." />
-                )}
-              </div>
-            )}
-          </div>
-        ) : null}
-      </Card>
+          <p className="text-xs text-muted">
+            Este estudio requiere un mínimo de <strong className="text-dark">{study?.min_publishable_n ?? '—'}</strong> respuestas
+            válidas por celda para publicar resultados desagregados. El backend aplica esta regla al generar el reporte.
+          </p>
 
-      {!studyId && step === 0 ? (
-        <Card>
-          <EmptyState title="Elige un estudio para empezar." description="El wizard te guía por 5 pasos hasta descargar el reporte." />
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => previewMutation.mutate()}
+            disabled={!studyId || previewState === 'GENERATING'}
+            loading={previewState === 'GENERATING'}
+            className="w-full"
+          >
+            <RefreshCw size={16} />
+            Actualizar vista previa
+          </Button>
         </Card>
-      ) : null}
+
+        <Card className="flex min-h-[520px] flex-col gap-3" padding="roomy">
+          {previewState === 'IDLE' ? (
+            <EmptyState
+              title="Configura y genera la vista previa"
+              description="Elige un estudio y las secciones a incluir, luego pulsa «Actualizar vista previa»."
+            />
+          ) : null}
+          {previewState === 'GENERATING' ? <LoadingState label="Generando vista previa del reporte…" /> : null}
+          {previewState === 'ERROR' ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+              <AlertTriangle size={28} className="text-danger" />
+              <p className="text-sm font-medium text-danger">No pudimos generar la vista previa.</p>
+              <Button variant="secondary" size="sm" onClick={() => previewMutation.mutate()}>
+                Reintentar
+              </Button>
+            </div>
+          ) : null}
+          {(previewState === 'READY' || previewState === 'STALE' || previewState === 'EXPORTING') && preview ? (
+            <>
+              {previewState === 'STALE' ? (
+                <p className="rounded-xl border border-amber/30 bg-amber/10 px-3 py-2 text-xs font-medium text-yellowDark">
+                  La configuración cambió. Actualiza la vista previa antes de exportar.
+                </p>
+              ) : null}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted">{preview.pages ? `${preview.pages} páginas` : ''}</span>
+              </div>
+              <iframe
+                title="Vista previa del reporte"
+                src={getReportPreviewPdfUrl(preview.preview_id)}
+                className="min-h-[560px] flex-1 rounded-xl border border-border"
+              />
+            </>
+          ) : null}
+
+          <div className="flex justify-end gap-3 border-t border-border pt-3">
+            <a
+              href={canExport ? exportUrl : undefined}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                if (!canExport) event.preventDefault();
+                else setPreviewState('EXPORTING');
+              }}
+              className={`colmena-button-primary ${canExport ? '' : 'pointer-events-none opacity-50'}`}
+            >
+              <Download size={16} className="mr-2" />
+              Exportar {outputFormat === 'PDF' ? 'PDF' : 'Word'}
+            </a>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

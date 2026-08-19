@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.exceptions import NotFoundError
-from app.schemas.reports import ReportRunCreate, ReportRunRead, ReportTemplateCreate, ReportTemplateRead
+from app.schemas.reports import (
+    ReportPreviewRead,
+    ReportRunCreate,
+    ReportRunRead,
+    ReportTemplateCreate,
+    ReportTemplateRead,
+)
 from app.services.report_service import ReportService
 
 router = APIRouter(tags=["reports"])
@@ -32,11 +38,47 @@ async def generate_report(
     return ReportRunRead.model_validate(report)
 
 
+@router.post("/studies/{study_id}/reports/preview", response_model=ReportPreviewRead, status_code=201)
+async def generate_report_preview(
+    study_id: int, payload: ReportRunCreate, session: AsyncSession = Depends(get_db)
+):
+    service = ReportService(session)
+    report_run, pages = await service.generate_preview(study_id, payload)
+    return ReportPreviewRead(
+        preview_id=report_run.id,
+        status=report_run.status,
+        pages=pages,
+        preview_url=f"/reports/{report_run.id}/preview.pdf",
+    )
+
+
 @router.get("/reports/{report_id}", response_model=ReportRunRead)
 async def get_report(report_id: int, session: AsyncSession = Depends(get_db)):
     service = ReportService(session)
     report = await service.get_run(report_id)
     return ReportRunRead.model_validate(report)
+
+
+@router.get("/reports/{report_id}/preview.pdf")
+async def download_report_preview(report_id: int, session: AsyncSession = Depends(get_db)):
+    service = ReportService(session)
+    report = await service.get_run(report_id)
+    if report.status != "COMPLETED" or not report.storage_path or not report.storage_path.endswith(".docx"):
+        raise NotFoundError(f"Reporte {report_id} no tiene una vista previa disponible todavía")
+
+    pdf_path = Path(report.storage_path).with_suffix(".pdf")
+    if not pdf_path.exists():
+        raise NotFoundError(f"Vista previa del reporte {report_id} no encontrada en almacenamiento")
+
+    # `filename=` hace que FileResponse mande Content-Disposition: attachment
+    # por defecto — eso fuerza una descarga y deja el <iframe> del preview en
+    # blanco. La vista previa debe abrirse inline; la descarga real vive en
+    # /reports/{id}/download.
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{pdf_path.name}"'},
+    )
 
 
 @router.get("/reports/{report_id}/download")

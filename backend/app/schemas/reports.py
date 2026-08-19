@@ -40,6 +40,13 @@ class ReportRunCreate(BaseModel):
     sections: list[str] = Field(default_factory=list)
 
 
+class ReportPreviewRead(BaseModel):
+    preview_id: int
+    status: str
+    pages: int | None
+    preview_url: str
+
+
 class ReportRunRead(BaseModel):
     id: int
     public_id: uuid.UUID

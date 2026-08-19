@@ -190,6 +190,44 @@ async def test_report_generation_supports_pdf(
     assert download_resp.content[:5] == b"%PDF-"
 
 
+async def test_report_preview_reuses_same_docx_for_download(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    """El preview siempre genera un DOCX (sin importar `output_format`
+    pedido) y el PDF de preview es una conversión de ese mismo archivo — el
+    hash de `/download` debe coincidir con el hash con el que se calculó el
+    PDF de preview: no hay una segunda generación al exportar."""
+    study, _ = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+
+    preview_resp = await client.post(
+        f"/api/v1/studies/{study['id']}/reports/preview",
+        json={"output_format": "PDF", "report_mode": "PROVISIONAL"},
+    )
+    assert preview_resp.status_code == 201, preview_resp.text
+    preview = preview_resp.json()
+    assert preview["status"] == "COMPLETED"
+    assert preview["pages"] and preview["pages"] > 0
+    assert preview["preview_url"] == f"/reports/{preview['preview_id']}/preview.pdf"
+
+    preview_pdf_resp = await client.get(f"/api/v1/reports/{preview['preview_id']}/preview.pdf")
+    assert preview_pdf_resp.status_code == 200
+    assert preview_pdf_resp.headers["content-type"] == "application/pdf"
+    assert preview_pdf_resp.content[:5] == b"%PDF-"
+
+    download_resp = await client.get(f"/api/v1/reports/{preview['preview_id']}/download")
+    assert download_resp.status_code == 200
+    assert download_resp.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert download_resp.content[:4] == b"PK\x03\x04"
+
+    report_resp = await client.get(f"/api/v1/reports/{preview['preview_id']}")
+    assert report_resp.status_code == 200
+    # El `output_format="PDF"` pedido no se respeta al previsualizar: el
+    # archivo canónico guardado siempre es el DOCX.
+    assert report_resp.json()["output_format"] == "DOCX"
+
+
 def test_report_serialization_removes_individual_payloads_recursively() -> None:
     from types import SimpleNamespace
     from app.services.report_service import ReportService

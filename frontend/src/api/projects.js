@@ -4,14 +4,16 @@ export function listProjects({ page = 1, pageSize = 10 } = {}) {
   return apiRequest(`/projects?page=${page}&page_size=${pageSize}`);
 }
 
-export function createProject({ ownerUserId, name, projectType, description }) {
+export function createProject({ ownerUserId, organizationId = null, name, projectType, description, metadata }) {
   return apiRequest('/projects', {
     method: 'POST',
     body: {
       owner_user_id: ownerUserId,
+      organization_id: organizationId,
       name,
       project_type: projectType,
       description: description || null,
+      metadata: metadata || {},
     },
   });
 }

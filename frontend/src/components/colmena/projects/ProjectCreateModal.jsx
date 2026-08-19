@@ -23,7 +23,7 @@ import { Modal } from '../../ui/Modal.jsx';
 
 const PROJECT_TYPES = [
   { value: 'ACADEMIC', label: 'Académico', description: 'Tesis de grado, maestría o doctorado.', icon: GraduationCap },
-  { value: 'CENSO', label: 'Censo', description: 'Recolección y lectura de datos poblacionales.', icon: Users },
+  { value: 'CENSO', label: 'Evaluación psicosocial', description: 'Campaña CENSOPAS-COPSOQ con resultados colectivos y medidas preventivas.', icon: Users },
   { value: 'RESEARCH', label: 'Investigación', description: 'Estudios científicos o institucionales.', icon: Search },
   { value: 'CUSTOM', label: 'Personalizado', description: 'Una estructura adaptada a tu caso.', icon: SlidersHorizontal },
 ];
@@ -34,6 +34,10 @@ const schema = z.object({
   description: z.string().trim().max(1000, 'Usa 1000 caracteres como máximo').optional(),
 });
 
+const campaignSchema = schema.extend({
+  workerCount: z.coerce.number().int().min(1, 'Indica al menos un trabajador').max(100000).optional(),
+  instrumentVersion: z.enum(['SHORT', 'MEDIUM']).optional(),
+});
 export default function ProjectCreateModal({ ownerUserId, onClose, onCreated }) {
   const formId = useId();
   const queryClient = useQueryClient();
@@ -44,13 +48,29 @@ export default function ProjectCreateModal({ ownerUserId, onClose, onCreated }) 
     watch,
     formState: { errors },
   } = useForm({
-    resolver: zodResolver(schema),
-    defaultValues: { name: '', projectType: 'ACADEMIC', description: '' },
+    resolver: zodResolver(campaignSchema),
+    defaultValues: { name: '', projectType: 'CENSO', description: '', workerCount: 24, instrumentVersion: 'SHORT' },
   });
 
   const selectedType = watch('projectType');
   const mutation = useMutation({
-    mutationFn: (values) => createProject({ ownerUserId, ...values }),
+    mutationFn: (values) => createProject({
+      ownerUserId,
+      name: values.name,
+      projectType: values.projectType,
+      description: values.description,
+      metadata: values.projectType === 'CENSO' ? {
+        product_mode: 'PSYCHOSOCIAL',
+        methodology: 'CENSOPAS_COPSOQ',
+        methodology_mode: 'COLMENA_EXPLORATORY',
+        instrument_version_kind: values.instrumentVersion,
+        expected_worker_count: Number(values.workerCount),
+        min_publishable_n: 5,
+        anonymity_mode: 'ANONYMOUS_LINK',
+        official_equivalence_enabled: false,
+        campaign_status: 'DRAFT',
+      } : {},
+    }),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['archive-projects'] });
@@ -142,6 +162,40 @@ export default function ProjectCreateModal({ ownerUserId, onClose, onCreated }) 
           />
           {errors.description ? <span className="text-xs font-medium text-danger">{errors.description.message}</span> : null}
         </label>
+
+        {selectedType === 'CENSO' ? (
+          <section className="space-y-3 rounded-2xl border border-turquoise/20 bg-gradient-to-br from-turquoise/10 via-white to-amber/5 p-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-turquoise text-white"><Users size={18} /></span>
+              <div>
+                <p className="text-sm font-bold text-dark">Configuracion CENSOPAS-COPSOQ</p>
+                <p className="mt-1 text-xs leading-5 text-muted">Demo sintetico para mineria. La empresa vera resultados colectivos, no respuestas individuales.</p>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <FormField
+                label="Trabajadores estimados"
+                type="number"
+                min="1"
+                error={errors.workerCount?.message}
+                {...register('workerCount')}
+              />
+              <label className="flex flex-col gap-2">
+                <span className="colmena-label">Version del cuestionario</span>
+                <select className="colmena-input" {...register('instrumentVersion')}>
+                  <option value="SHORT">Corta - 42 preguntas / 6 dimensiones</option>
+                  <option value="MEDIUM">Media - 112 preguntas / 20 subdimensiones</option>
+                </select>
+              </label>
+            </div>
+            <p className="rounded-xl border border-turquoise/20 bg-white/75 px-3 py-2 text-xs leading-5 text-muted">
+              Recomendacion: {Number(watch('workerCount')) >= 25 ? 'version media para una lectura por subdimensiones.' : 'version corta para centros pequenos.'}
+            </p>
+            <p className="rounded-xl border border-dark/10 bg-dark px-3 py-2 text-xs leading-5 text-white/75">
+              Enlace anonimo, sin nombre, DNI ni correo junto a las respuestas. Se suprimen grupos menores de 5 personas.
+            </p>
+          </section>
+        ) : null}
 
         <div className="rounded-2xl border border-amber/20 bg-yellowSoft/70 p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-yellowDark">Estructura del proyecto</p>

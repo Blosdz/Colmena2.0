@@ -29,6 +29,7 @@ from app.schemas.analytics import (
 )
 from app.services.analysis_service import AnalysisService
 from app.services.advanced_analysis_service import AdvancedAnalysisService
+from app.services.intelligence_service import IntelligenceService
 
 router = APIRouter(tags=["analytics"])
 
@@ -156,6 +157,12 @@ async def construct_compare_groups(
     session: AsyncSession = Depends(get_db),
 ):
     return await AdvancedAnalysisService(session).compare_construct_groups(study_id, payload)
+
+@router.get("/studies/{study_id}/analytics/intelligence-summary")
+async def intelligence_summary(
+    study_id: int, session: AsyncSession = Depends(get_db)
+):
+    return await IntelligenceService(session).build(study_id)
 
 
 @router.post("/studies/{study_id}/analysis-runs", response_model=AnalysisRunRead, status_code=201)

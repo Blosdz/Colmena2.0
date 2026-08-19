@@ -46,6 +46,10 @@ export function runSpearmanMatrix(studyId, payload = {}) {
   return apiRequest(`/studies/${studyId}/analytics/spearman-matrix`, { method: 'POST', body: payload });
 }
 
+export function getIntelligenceSummary(studyId) {
+  return apiRequest(`/studies/${studyId}/analytics/intelligence-summary`);
+}
+
 export function compareConstructGroups(studyId, payload) {
   return apiRequest(`/studies/${studyId}/analytics/construct-compare-groups`, { method: 'POST', body: payload });
 }

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 
-import { fetchCurrentUser, loginUser, registerUser } from '../api/auth.js';
+import { fetchCurrentUser, loginDemoUser, loginUser, registerUser } from '../api/auth.js';
 import { clearStoredToken, getStoredToken, setStoredToken } from '../api/client.js';
 
 const AuthContext = createContext(null);
@@ -41,6 +41,12 @@ export function AuthProvider({ children }) {
     [loadCurrentUser],
   );
 
+  const loginDemo = useCallback(async () => {
+    const { access_token: token } = await loginDemoUser();
+    setStoredToken(token);
+    await loadCurrentUser();
+  }, [loadCurrentUser]);
+
   const signup = useCallback(async (payload) => {
     await registerUser(payload);
   }, []);
@@ -52,8 +58,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, status, login, signup, logout }),
-    [user, status, login, signup, logout],
+    () => ({ user, status, login, loginDemo, signup, logout }),
+    [user, status, login, loginDemo, signup, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

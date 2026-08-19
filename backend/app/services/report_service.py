@@ -23,193 +23,20 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationDomainError
 from app.models.analysis import AnalysisResult, AnalysisRun
 from app.models.bsc import ActionPlan, ActionPlanItem, Kpi
 from app.models.censopas import Barem
 from app.models.construct import Construct
+from app.models.project import Project
+from app.models.user import Organization
 from app.repositories.analytics import AnalyticsRepository
 from app.repositories.reports import ReportRepository
 from app.repositories.studies import StudyRepository
 from app.schemas.reports import ReportRunCreate, ReportTemplateCreate
 from app.services.censopas_service import CensopasScoringService
+from app.services.intelligence_service import IntelligenceService
 from app.services.scoring_service import ScoringService
-
-
-def _render_report_pdf(bundle: dict) -> bytes:
-    """Render PDF multipágina desde el mismo bundle, sin datos individuales."""
-    import io
-    import textwrap
-
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-
-    output = io.BytesIO()
-    selected_sections = set(bundle.get("sections") or [])
-    pages_rendered = 0
-
-    def add_page(pdf, title: str, lines: list[str]) -> None:
-        nonlocal pages_rendered
-        section_keys = (
-            {"trazabilidad", "ficha_tecnica"}
-            if title == "Estado metodológico"
-            else {"resultados_globales", "dimensiones", "subdimensiones", "unidades_seguras"}
-            if title == "Resultados CENSOPAS"
-            else {"plan_accion"}
-            if title == "Plan de acción"
-            else {"hallazgos_premium"}
-            if title == "Analítica premium"
-            else {"anexos", "trazabilidad"}
-            if title == "Anexos y trazabilidad"
-            else {"variables_descriptivas"}
-            if title == "Analítica complementaria"
-            else {"portada"}
-        )
-        if selected_sections and not selected_sections.intersection(section_keys):
-            return
-        pages_rendered += 1
-        figure = plt.figure(figsize=(8.27, 11.69), dpi=120)
-        figure.patch.set_facecolor("white")
-        figure.text(0.08, 0.94, title, fontsize=18, fontweight="bold", color="#1C1F24")
-        y = 0.89
-        for line in lines:
-            wrapped = textwrap.wrap(str(line), width=105) or [""]
-            for part in wrapped:
-                figure.text(0.08, y, part, fontsize=9.5, color="#374151")
-                y -= 0.024
-            y -= 0.008
-            if y < 0.08:
-                break
-        figure.text(0.08, 0.035, "Colmena · CENSOPAS-COPSOQ", fontsize=8, color="#6B7280")
-        pdf.savefig(figure, bbox_inches="tight")
-        plt.close(figure)
-
-    with PdfPages(output) as pdf:
-        study = bundle.get("study") or {}
-        mode = bundle.get("report_mode", "PROVISIONAL")
-        add_page(
-            pdf,
-            study.get("name") or "Reporte",
-            [
-                "Reporte oficial CENSOPAS-COPSOQ"
-                if mode == "OFFICIAL"
-                else "Reporte provisional — sin equivalencia oficial",
-                f"Tipo de estudio: {study.get('study_type', '—')}",
-                f"Estado: {study.get('status', '—')}",
-                f"Generado: {bundle.get('generated_at', '—')}",
-            ],
-        )
-        readiness = bundle.get("methodological_status") or {}
-        add_page(
-            pdf,
-            "Estado metodológico",
-            [
-                f"Versión: {readiness.get('version_kind', 'UNKNOWN')}",
-                f"Listo para scoring: {readiness.get('ready_for_scoring', False)}",
-                "Equivalencia oficial: "
-                + ("habilitada" if readiness.get("ready_for_official_reporting") else "no habilitada"),
-                "Conteos esperados: " + json.dumps(readiness.get("expected", {}), ensure_ascii=False),
-                "Conteos actuales: " + json.dumps(readiness.get("actual", {}), ensure_ascii=False),
-                "Bloqueos: " + ", ".join(readiness.get("errors", [])),
-                "Advertencias: " + ", ".join(readiness.get("warnings", [])),
-            ],
-        )
-        construct_lines = []
-        for result in bundle.get("censopas_results") or []:
-            if result.get("suppressed"):
-                construct_lines.append(
-                    f"{result.get('construct_code', '—')} · resultado suprimido (n={result.get('n_valid', 0)})"
-                )
-            else:
-                construct_lines.append(
-                    f"{result.get('construct_code', '—')} · n={result.get('n_valid', 0)} · "
-                    f"score={result.get('construct_score', '—')} · "
-                    f"clasificación={result.get('collective_classification', '—')}"
-                )
-        add_page(
-            pdf,
-            "Resultados CENSOPAS",
-            construct_lines or ["No hay resultados CENSOPAS persistidos para este estudio."],
-        )
-        analysis_lines = [
-            f"{result.get('result_code') or '—'} · {result.get('result_type', '—')} · "
-            f"n={result.get('n_valid', '—')} · p={result.get('p_value', '—')}"
-            for result in (bundle.get("analysis_results") or [])[:50]
-        ]
-        if analysis_lines:
-            add_page(pdf, "Analítica complementaria", analysis_lines)
-
-        action_lines = []
-        for plan in bundle.get("action_plans") or []:
-            action_lines.append(
-                f"{plan.get('name') or 'Plan de acción'} · estado={plan.get('status') or '—'} · "
-                f"{'aprobado' if plan.get('approved') else 'pendiente de aprobación'}"
-            )
-            for item in plan.get("items") or []:
-                action_lines.append(
-                    f"P{item.get('priority') or '—'} · {item.get('construct_code') or '—'} · "
-                    f"{item.get('action_description') or item.get('title') or '—'} · "
-                    f"responsable={item.get('responsible_label') or '—'} · fecha={item.get('due_date') or '—'}"
-                )
-                for kpi in item.get("kpis") or []:
-                    latest = kpi.get("latest_measurement") or {}
-                    value = latest.get("numeric_value")
-                    if value is None:
-                        value = latest.get("text_value") or "sin medición"
-                    action_lines.append(
-                        f"KPI {kpi.get('code') or '—'}: {kpi.get('name') or '—'} · "
-                        f"meta={kpi.get('target_value') or '—'} · último={value}"
-                    )
-        add_page(
-            pdf,
-            "Plan de acción",
-            action_lines or ["No hay planes de acción registrados para este estudio."],
-        )
-
-        premium = bundle.get("premium_analytics") or {}
-        premium_lines = [
-            f"Estado: {premium.get('status') or 'NO_RESULTS'}",
-            "Métodos: " + (", ".join(premium.get("methods") or []) or "—"),
-            f"Resultados publicables: {premium.get('result_count', 0)}",
-            f"Resultados significativos: {premium.get('significant_result_count', 0)}",
-        ]
-        for result in (premium.get("results") or [])[:50]:
-            premium_lines.append(
-                f"{result.get('result_code') or '—'} · {result.get('result_type') or '—'} · "
-                f"n={result.get('n_valid') or '—'} · p={result.get('adjusted_p_value') or result.get('p_value') or '—'}"
-            )
-        premium_lines.extend(premium.get("limitations") or [])
-        add_page(pdf, "Analítica premium", premium_lines)
-
-        traceability = bundle.get("traceability") or {}
-        barem = traceability.get("barem") or {}
-        trace_lines = [
-            f"Versión: {traceability.get('version_kind') or '—'}",
-            f"Hash del manifiesto: {traceability.get('manifest_hash') or '—'}",
-            "Linaje: " + " → ".join(traceability.get("lineage") or []),
-            f"Baremo: {barem.get('name') or '—'} · versión {barem.get('version') or '—'}",
-            f"Hash del baremo: {barem.get('content_hash') or '—'}",
-            "Registros individuales incluidos: no",
-        ]
-        for run in traceability.get("analysis_runs") or []:
-            trace_lines.append(
-                f"Ejecución {run.get('analysis_type') or '—'} · estado={run.get('status') or '—'} · "
-                f"algoritmo={run.get('algorithm_version') or '—'} · hash={run.get('input_hash') or '—'}"
-            )
-        add_page(pdf, "Anexos y trazabilidad", trace_lines)
-        if pages_rendered == 0:
-            selected_sections.clear()
-            add_page(
-                pdf,
-                "Secciones seleccionadas",
-                [
-                    "Las secciones solicitadas aún no tienen contenido disponible "
-                    "para este estudio.",
-                    "Selección: " + ", ".join(bundle.get("sections") or []),
-                ],
-            )
-
-    return output.getvalue()
 
 
 class ReportService:
@@ -279,7 +106,8 @@ class ReportService:
                 path = storage_dir / f"{report_run.public_id}.docx"
                 path.write_bytes(file_bytes)
             elif payload.output_format == "PDF":
-                file_bytes = _render_report_pdf(bundle)
+                from app.services.report_pdf import render_report_pdf
+                file_bytes = render_report_pdf(bundle)
                 path = storage_dir / f"{report_run.public_id}.pdf"
                 path.write_bytes(file_bytes)
             else:
@@ -322,6 +150,10 @@ class ReportService:
             "report_mode": report_mode,
             "sections": sections or [],
             "methodological_status": None,
+            "project": None,
+            "company": None,
+            "thresholds": {},
+            "intelligence": None,
             "analysis_results": [],
             "censopas_results": [],
             "barem_results": None,
@@ -329,6 +161,42 @@ class ReportService:
             "premium_analytics": None,
             "traceability": None,
         }
+
+        project = await self.session.get(Project, study.project_id)
+        if project is not None:
+            project_metadata = project.metadata_ or {}
+            bundle["project"] = {
+                "id": project.id,
+                "public_id": str(project.public_id),
+                "name": project.name,
+                "description": project.description,
+                "status": project.status,
+            }
+            bundle["thresholds"] = project_metadata.get("thresholds") or {}
+            organization = (
+                await self.session.get(Organization, project.organization_id)
+                if project.organization_id is not None
+                else None
+            )
+            if organization is not None:
+                metadata = organization.metadata_ or {}
+                bundle["company"] = {
+                    "name": organization.name,
+                    "legal_name": organization.legal_name,
+                    "tax_id": organization.tax_id,
+                    "organization_type": organization.organization_type,
+                    "industry": metadata.get("industry"),
+                    "ciiu_code": metadata.get("ciiu_code"),
+                    "fiscal_address": metadata.get("fiscal_address"),
+                    "worker_count": metadata.get("worker_count"),
+                    "representative_name": metadata.get("representative_name"),
+                    "study_lead_name": metadata.get("study_lead_name"),
+                    "locations": metadata.get("locations") or [],
+                    "signatories": metadata.get("signatories") or [],
+                }
+            elif project_metadata.get("company_snapshot"):
+                bundle["company"] = project_metadata["company_snapshot"]
+
 
         if analysis_run_id is not None:
             run = await self.analytics_repo.get_run(analysis_run_id)
@@ -365,6 +233,12 @@ class ReportService:
         bundle["premium_analytics"] = self._build_premium_analytics(
             bundle["analysis_results"], study.min_publishable_n
         )
+        try:
+            bundle["intelligence"] = await IntelligenceService(self.session).build(study.id)
+        except (NotFoundError, ValidationDomainError):
+            # Estudios genéricos o sin scoring conservan un reporte válido sin esta capa.
+            bundle["intelligence"] = None
+
         bundle["traceability"] = await self._build_traceability(study, bundle)
         return bundle
 

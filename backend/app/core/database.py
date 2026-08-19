@@ -14,6 +14,9 @@ settings = get_settings()
 COLMENA_SCHEMA = "colmena"
 
 engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
+# El demo local puede usar SQLite sin cambiar el esquema PostgreSQL de producción.
+if settings.database_url.startswith("sqlite"):
+    engine = engine.execution_options(schema_translate_map={COLMENA_SCHEMA: None})
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

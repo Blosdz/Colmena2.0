@@ -67,7 +67,7 @@ class AdvancedAnalysisService:
             select(AnalysisRun)
             .where(
                 AnalysisRun.study_id == study_id,
-                AnalysisRun.analysis_type == "LIKERT_SCORING",
+                AnalysisRun.analysis_type.in_(("LIKERT_SCORING", "CENSOPAS_SCORING")),
                 AnalysisRun.status == "COMPLETED",
             )
             .order_by(AnalysisRun.completed_at.desc(), AnalysisRun.id.desc())

@@ -5,7 +5,9 @@ from app.api.v1 import (
     auth,
     bsc,
     censopas,
+    company,
     constructs,
+    demo,
     exports,
     instruments,
     projects,
@@ -20,6 +22,7 @@ from app.api.v1 import (
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
+api_router.include_router(company.router)
 api_router.include_router(projects.router)
 api_router.include_router(instruments.router)
 api_router.include_router(variables.router)
@@ -29,6 +32,7 @@ api_router.include_router(studies.router)
 api_router.include_router(responses.router)
 api_router.include_router(analytics.router)
 api_router.include_router(censopas.router)
+api_router.include_router(demo.router)
 api_router.include_router(exports.router)
 api_router.include_router(bsc.router)
 api_router.include_router(reports.router)

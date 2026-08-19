@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 
-import { Sidebar } from './Sidebar.jsx';
+import { CompanySidebar } from './CompanySidebar.jsx';
+import { CompanyMobileNav } from './CompanyMobileNav.jsx';
 import { Topbar } from './Topbar.jsx';
 import { ColmenaMenuButton } from './ColmenaMenuButton.jsx';
 
@@ -25,7 +26,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-transparent">
       <div className="flex min-h-screen">
-        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+        <CompanySidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
         <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <Topbar />
           <main className={isWorkspace ? 'flex min-w-0 flex-1 flex-col overflow-x-hidden' : 'flex-1'}>
@@ -47,6 +48,7 @@ export function AppShell() {
           className="fixed left-3 top-3 z-30 hidden rounded-xl border border-[#E6E8EB] bg-white/95 p-2.5 shadow-sm backdrop-blur transition hover:border-amber/40 hover:shadow-md lg:flex"
         />
       )}
+      <CompanyMobileNav />
     </div>
   );
 }

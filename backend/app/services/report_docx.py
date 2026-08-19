@@ -33,6 +33,7 @@ def render_report_docx(bundle: dict) -> bytes:
     document = Document()
 
     study = bundle.get("study") or {}
+    company = bundle.get("company") or {}
     barem = bundle.get("barem_results")
     selected = set(bundle.get("sections") or [])
 
@@ -45,7 +46,10 @@ def render_report_docx(bundle: dict) -> bytes:
             study,
             bundle.get("generated_at"),
             bundle.get("report_mode", "PROVISIONAL"),
+            company,
         )
+    if include("portada", "ficha_tecnica"):
+        _add_company_context(document, company, bundle.get("thresholds") or {})
     if include("trazabilidad", "ficha_tecnica"):
         _add_methodological_status(document, bundle.get("methodological_status"))
     if include("ficha_tecnica"):
@@ -75,10 +79,13 @@ def render_report_docx(bundle: dict) -> bytes:
         _add_analysis_section(document, bundle["analysis_results"])
     if include("hallazgos_premium"):
         _add_premium_section(document, bundle.get("premium_analytics") or {})
+        _add_intelligence_section(document, bundle.get("intelligence") or {})
     if include("plan_accion"):
         _add_action_plan_section(document, bundle.get("action_plans") or [])
     if include("anexos", "trazabilidad"):
         _add_traceability_appendix(document, bundle.get("traceability") or {})
+    if include("portada", "anexos", "trazabilidad"):
+        _add_signatures(document, company)
 
     buffer = io.BytesIO()
     document.save(buffer)
@@ -90,9 +97,19 @@ def _add_cover(
     study: dict,
     generated_at: str | None,
     report_mode: str,
+    company: dict | None = None,
 ) -> None:
     title = document.add_heading(study.get("name") or "Reporte", level=0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    company = company or {}
+    company_name = company.get("legal_name") or company.get("name")
+    if company_name:
+        owner = document.add_paragraph(company_name)
+        owner.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if owner.runs:
+            owner.runs[0].font.size = Pt(15)
+            owner.runs[0].font.bold = True
 
     mode_label = (
         "Reporte oficial CENSOPAS-COPSOQ"
@@ -114,6 +131,194 @@ def _add_cover(
             date_paragraph.runs[0].font.color.rgb = _MUTED_RGB
 
     document.add_page_break()
+
+
+def _add_company_context(document: Document, company: dict, thresholds: dict) -> None:
+    document.add_heading("Identificación de la empresa y alcance", level=1)
+    if not company:
+        document.add_paragraph(
+            "El perfil empresarial no estaba disponible al momento de emitir este borrador."
+        )
+        return
+
+    locations = company.get("locations") or []
+    location_names = [
+        item.get("name") if isinstance(item, dict) else str(item)
+        for item in locations
+    ]
+    rows = [
+        ("Razón social", company.get("legal_name") or company.get("name") or "—"),
+        ("RUC", company.get("tax_id") or "—"),
+        ("Actividad económica", company.get("industry") or "—"),
+        ("CIIU", company.get("ciiu_code") or "—"),
+        ("Domicilio fiscal", company.get("fiscal_address") or "—"),
+        ("Dotación declarada", str(company.get("worker_count") or "—")),
+        ("Representante", company.get("representative_name") or "—"),
+        ("Responsable del estudio", company.get("study_lead_name") or "—"),
+        ("Sedes incluidas", ", ".join(filter(None, location_names)) or "—"),
+    ]
+    table = document.add_table(rows=0, cols=2)
+    table.style = "Light List Accent 1"
+    for label, value in rows:
+        cells = table.add_row().cells
+        cells[0].text = label
+        cells[1].text = value
+        for run in cells[0].paragraphs[0].runs:
+            run.font.bold = True
+
+    document.add_heading("Límites de control del estudio", level=2)
+    controls = [
+        ("Meta de cobertura", thresholds.get("coverage_target", 85), "%"),
+        ("Cobertura crítica", thresholds.get("coverage_critical", 65), "%"),
+        ("Meta de completitud", thresholds.get("completion_target", 90), "%"),
+        ("Vigilancia de exposición", thresholds.get("risk_warning", 35), "%"),
+        ("Exposición crítica", thresholds.get("risk_critical", 50), "%"),
+    ]
+    control_table = document.add_table(rows=1, cols=3)
+    control_table.style = "Light Grid Accent 1"
+    for index, header in enumerate(["Indicador", "Límite", "Interpretación"]):
+        control_table.rows[0].cells[index].text = header
+    for label, value, unit in controls:
+        cells = control_table.add_row().cells
+        cells[0].text = label
+        cells[1].text = f"{value}{unit}"
+        cells[2].text = (
+            "Meta operativa"
+            if "Meta" in label
+            else "Alerta crítica"
+            if "crítica" in label
+            else "Umbral de vigilancia"
+        )
+    document.add_paragraph(
+        "Los límites se muestran con etiqueta, valor y significado; el color nunca es "
+        "el único medio para interpretar una alerta."
+    )
+
+
+def _add_intelligence_section(document: Document, intelligence: dict) -> None:
+    document.add_heading("Inteligencia estadística y robustez", level=1)
+    if not intelligence:
+        document.add_paragraph(
+            "Esta capa no está disponible porque el estudio aún no tiene una corrida de scoring completa."
+        )
+        return
+
+    quality = intelligence.get("quality") or {}
+    decision = intelligence.get("decision") or {}
+    document.add_paragraph(
+        f"Muestra analítica n={intelligence.get('n', '—')}. "
+        f"Dimensiones no normales: {quality.get('non_normal_dimensions', '—')}. "
+        f"Casos atípicos detectados: {quality.get('outlier_sessions', '—')} "
+        f"({quality.get('outlier_pct', '—')}%). "
+        f"Máxima variación de sensibilidad: {quality.get('sensitivity_max_delta', '—')} puntos."
+    )
+    document.add_paragraph(
+        "Decisión automática: "
+        f"{decision.get('recommended_comparison', '—')}; "
+        f"correlación {decision.get('recommended_correlation', '—')}. "
+        f"{decision.get('outlier_policy', '')}"
+    )
+
+    dimensions = intelligence.get("dimensions") or []
+    if dimensions:
+        headers = [
+            "Dimensión", "N", "Media", "Mediana (IC 95%)", "α", "ω",
+            "Normalidad", "Atípicos", "Δ sensibilidad",
+        ]
+        table = document.add_table(rows=1, cols=len(headers))
+        table.style = "Light Grid Accent 1"
+        for index, header in enumerate(headers):
+            table.rows[0].cells[index].text = header
+        for item in dimensions:
+            cells = table.add_row().cells
+            cells[0].text = f"{item.get('code') or '—'} · {item.get('name') or '—'}"
+            cells[1].text = str(item.get("n") or "—")
+            cells[2].text = _format_number(item.get("mean"))
+            cells[3].text = (
+                f"{_format_number(item.get('median'))} "
+                f"[{_format_number(item.get('median_ci_lower'))}, "
+                f"{_format_number(item.get('median_ci_upper'))}]"
+            )
+            cells[4].text = _format_number(item.get("alpha"), 3)
+            cells[5].text = _format_number(item.get("omega"), 3)
+            cells[6].text = (
+                f"{item.get('normality_status') or '—'} "
+                f"(p={_format_number(item.get('normality_p'), 4)})"
+            )
+            cells[7].text = str(item.get("outlier_count") or 0)
+            cells[8].text = _format_number(item.get("sensitivity_delta"))
+
+    significant = [
+        item for item in intelligence.get("correlations") or [] if item.get("significant")
+    ][:12]
+    if significant:
+        document.add_heading("Asociaciones ajustadas por multiplicidad", level=2)
+        table = document.add_table(rows=1, cols=6)
+        table.style = "Light Grid Accent 1"
+        for index, header in enumerate(["Variable X", "Variable Y", "N", "ρ", "p ajustado", "Magnitud"]):
+            table.rows[0].cells[index].text = header
+        for item in significant:
+            cells = table.add_row().cells
+            cells[0].text = item.get("x_name") or item.get("x") or "—"
+            cells[1].text = item.get("y_name") or item.get("y") or "—"
+            cells[2].text = str(item.get("n") or "—")
+            cells[3].text = _format_number(item.get("rho"), 3)
+            cells[4].text = _format_number(item.get("adjusted_p_value"), 4)
+            cells[5].text = item.get("magnitude") or "—"
+
+    clustering = intelligence.get("clustering") or {}
+    if clustering.get("status") == "AVAILABLE":
+        document.add_heading("Perfiles agregados exploratorios", level=2)
+        document.add_paragraph(
+            f"K={clustering.get('k')}; silhouette={_format_number(clustering.get('silhouette'), 3)}. "
+            "Los perfiles no se utilizan para clasificar ni intervenir personas."
+        )
+        table = document.add_table(rows=1, cols=4)
+        table.style = "Light Grid Accent 1"
+        for index, header in enumerate(["Perfil", "N", "Índice de exposición", "Lectura"]):
+            table.rows[0].cells[index].text = header
+        for profile in clustering.get("profiles") or []:
+            cells = table.add_row().cells
+            cells[0].text = str(profile.get("cluster_id") or "—")
+            cells[1].text = str(profile.get("n") or "—")
+            cells[2].text = _format_number(profile.get("risk_index"), 1)
+            cells[3].text = profile.get("label") or "—"
+
+    limitations = intelligence.get("limitations") or []
+    if limitations:
+        document.add_heading("Limitaciones de interpretación", level=2)
+        for limitation in limitations:
+            document.add_paragraph(limitation, style="List Bullet")
+
+
+def _add_signatures(document: Document, company: dict) -> None:
+    document.add_page_break()
+    document.add_heading("Firmas y conformidad", level=1)
+    document.add_paragraph(
+        "El expediente requiere revisión humana, conformidad y firma antes de su presentación."
+    )
+    signatories = list(company.get("signatories") or [])[:4]
+    defaults = [
+        "Profesional responsable",
+        "Representante de la empresa",
+        "Ingeniero/a de seguridad",
+        "Psicólogo/a ocupacional",
+    ]
+    while len(signatories) < 4:
+        signatories.append({})
+    table = document.add_table(rows=2, cols=2)
+    table.style = "Table Grid"
+    for index, item in enumerate(signatories):
+        cell = table.rows[index // 2].cells[index % 2]
+        role = item.get("role") or defaults[index]
+        name = item.get("full_name") or "Nombre: ______________________________"
+        credential = item.get("professional_id") or "Registro profesional: ________________"
+        cell.text = (
+            "\n\n______________________________\n"
+            f"{name}\n{role}\n{credential}\nFecha: ____ / ____ / ______"
+        )
+        for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
 def _add_methodological_status(document: Document, readiness: dict | None) -> None:

@@ -23,8 +23,16 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7
 
-    cors_origins: list[str] = ["http://localhost:5174", "http://127.0.0.1:5174"]
+    cors_origins: list[str] = [
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
+    ]
 
+
+    demo_access_enabled: bool = False
+    demo_user_email: str = "demo@colmena.pe"
     # E-17: protección anti-abuso mínima del formulario público (sin Redis —
     # limitación conocida en despliegues multi-worker, documentada en
     # app/core/rate_limit.py).

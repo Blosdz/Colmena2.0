@@ -52,6 +52,18 @@ export function getResultsOverview(studyId) {
   return apiRequest(`/studies/${studyId}/results/overview`);
 }
 
+export function getCensopasResults(studyId) {
+  return apiRequest(`/studies/${studyId}/censopas/results`);
+}
+
+export function listStudyUnitTypes(studyId) {
+  return apiRequest(`/studies/${studyId}/unit-types`);
+}
+
+export function getCensopasUnitResults(studyId, unitTypeId) {
+  return apiRequest(`/studies/${studyId}/censopas/unit-results?unit_type_id=${unitTypeId}`);
+}
+
 export function listBarems(versionId) {
   return apiRequest(`/instrument-versions/${versionId}/barems`);
 }

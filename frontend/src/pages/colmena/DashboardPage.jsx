@@ -46,6 +46,9 @@ export default function DashboardPage() {
               <Plus size={16} className="mr-1" />
               Crear proyecto
             </PrimaryAction>
+            <Link to="/colmena/demo">
+              <button type="button" className="colmena-button-secondary">Ver demo minero</button>
+            </Link>
             {latestProject ? (
               <Link to={`/colmena/project/${latestProject.id}`}>
                 <button type="button" className="colmena-button-secondary">

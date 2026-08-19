@@ -1,1 +1,4 @@
 .superdesign/tmp/
+*.db
+*.log
+reports_storage/

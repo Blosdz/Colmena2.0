@@ -7,7 +7,6 @@ import { getProject } from '../../../api/projects.js';
 import {
   getResponseDescriptives,
   getResultsOverview,
-  getWideDataset,
   listStudies,
 } from '../../../api/studies.js';
 import { getProjectTelemetry } from '../../../api/telemetry.js';
@@ -21,7 +20,6 @@ import { ErrorState } from '../../../components/ui/ErrorState.jsx';
 import { LoadingState } from '../../../components/ui/LoadingState.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import ResponseDistributionsTab from '../../../components/colmena/telemetry/ResponseDistributionsTab.jsx';
-import ResponseMatrixTab from '../../../components/colmena/telemetry/ResponseMatrixTab.jsx';
 import TelemetryComparisonsTab from '../../../components/colmena/telemetry/TelemetryComparisonsTab.jsx';
 import TelemetrySummaryTab from '../../../components/colmena/telemetry/TelemetrySummaryTab.jsx';
 
@@ -29,7 +27,6 @@ const TABS = [
   { key: 'summary', label: 'Resumen' },
   { key: 'distributions', label: 'Distribuciones' },
   { key: 'comparisons', label: 'Comparaciones' },
-  { key: 'responses', label: 'Base de respuestas' },
 ];
 
 function usePageVisibility() {
@@ -90,24 +87,16 @@ export default function AdaptiveProjectTelemetryPage() {
     refetchInterval,
     refetchIntervalInBackground: false,
   });
-  const datasetQuery = useQuery({
-    queryKey: ['wideDataset', studyId],
-    queryFn: () => getWideDataset(studyId),
-    enabled: Boolean(studyId) && tab === 'responses',
-    refetchInterval: tab === 'responses' ? refetchInterval : false,
-    refetchIntervalInBackground: false,
-  });
 
   const selectedTelemetry = (telemetryQuery.data?.studies || []).find((study) => study.study_id === studyId);
-  const isRefreshing = telemetryQuery.isFetching || descriptivesQuery.isFetching || overviewQuery.isFetching || datasetQuery.isFetching;
-  const hasDataError = telemetryQuery.isError || descriptivesQuery.isError || overviewQuery.isError || datasetQuery.isError;
+  const isRefreshing = telemetryQuery.isFetching || descriptivesQuery.isFetching || overviewQuery.isFetching;
+  const hasDataError = telemetryQuery.isError || descriptivesQuery.isError || overviewQuery.isError;
 
   const refresh = () => {
     telemetryQuery.refetch();
     if (studyId) {
       descriptivesQuery.refetch();
       overviewQuery.refetch();
-      if (tab === 'responses') datasetQuery.refetch();
     }
   };
 
@@ -119,7 +108,7 @@ export default function AdaptiveProjectTelemetryPage() {
       <PageHeader
         eyebrow="Telemetría"
         title={projectQuery.data.name}
-        description="Participación, distribuciones, comparaciones y respuestas válidas en un solo dashboard."
+        description="Participación, cobertura y distribuciones agregadas en tiempo real, con anonimato protegido."
         actions={(
           <>
             <Button onClick={() => setPaused((value) => !value)} size="sm" type="button" variant="secondary">
@@ -197,14 +186,6 @@ export default function AdaptiveProjectTelemetryPage() {
         <TelemetryComparisonsTab
           descriptives={descriptivesQuery.data}
           overview={overviewQuery.data}
-          studyId={studyId}
-        />
-      ) : null}
-      {studyId && tab === 'responses' ? (
-        <ResponseMatrixTab
-          dataset={datasetQuery.data}
-          descriptives={descriptivesQuery.data}
-          isLoading={datasetQuery.isLoading}
           studyId={studyId}
         />
       ) : null}

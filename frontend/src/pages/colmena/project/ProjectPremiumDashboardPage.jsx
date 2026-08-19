@@ -1,274 +1,253 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Activity, AlertTriangle, Clock, Layers, Sparkles, Target, Users } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  LabelList,
+  Legend,
+  PolarAngleAxis,
+  PolarGrid,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Building2,
+  CheckCircle2,
+  CircleGauge,
+  Clock,
+  FileText,
+  ShieldCheck,
+  Target,
+  Users,
+} from 'lucide-react';
 
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
 import { getProject } from '../../../api/projects.js';
 import { getProjectTelemetry } from '../../../api/telemetry.js';
-import { getResultsOverview } from '../../../api/studies.js';
-import { listVariables } from '../../../api/variables.js';
-import { runAnalysis, runSpearmanMatrix } from '../../../api/analytics.js';
-
+import {
+  getCensopasResults,
+  getCensopasUnitResults,
+  getResultsOverview,
+  listStudies,
+  listStudyUnitTypes,
+} from '../../../api/studies.js';
 import { PageHeader } from '../../../components/layout/PageHeader.jsx';
-import { Button } from '../../../components/ui/Button.jsx';
 import { Card } from '../../../components/ui/Card.jsx';
+import { Button } from '../../../components/ui/Button.jsx';
 import { EmptyState } from '../../../components/ui/EmptyState.jsx';
 import { LoadingState } from '../../../components/ui/LoadingState.jsx';
-import MetricCard from '../../../components/ui/MetricCard.jsx';
-import { Table, TableContainer, Td, THead, Th, Tr } from '../../../components/ui/Table.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import StudySelector from '../../../components/colmena/StudySelector.jsx';
-import { SpearmanMatrix } from '../../../components/colmena/results/SpearmanPanel.jsx';
-import { formatNumber, formatPercent } from '../../../utils/format.js';
-import { semanticBand, semanticBandColor, semanticBandOrder } from '../../../utils/chartColors.js';
 
-const K_OPTIONS = [2, 3, 4];
+const COLORS = {
+  favorable: '#24A886',
+  intermediate: '#F2B84B',
+  unfavorable: '#E05959',
+  ink: '#183238',
+  turquoise: '#11B7B2',
+};
 
-function formatDuration(seconds) {
+function pct(value, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return `${Number(value).toFixed(digits)}%`;
+}
+
+function number(value, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return Number(value).toFixed(digits);
+}
+
+function duration(seconds) {
   if (seconds === null || seconds === undefined) return '—';
-  const rounded = Math.round(seconds);
-  if (rounded < 60) return `${rounded}s`;
-  return `${Math.floor(rounded / 60)}m ${rounded % 60}s`;
+  const minutes = Math.floor(Number(seconds) / 60);
+  return `${minutes} min ${Math.round(Number(seconds) % 60)} s`;
 }
 
-function dominantBand(result) {
-  if (!result?.bands?.length) return null;
-  return result.bands.reduce((best, band) => ((band.pct || 0) > (best.pct || 0) ? band : best), result.bands[0]);
+function wilsonInterval(count, total) {
+  if (!total) return [0, 0];
+  const z = 1.96;
+  const p = count / total;
+  const denominator = 1 + (z * z) / total;
+  const center = (p + (z * z) / (2 * total)) / denominator;
+  const margin = (z / denominator) * Math.sqrt((p * (1 - p)) / total + (z * z) / (4 * total * total));
+  return [Math.max(0, center - margin) * 100, Math.min(1, center + margin) * 100];
 }
 
-function unfavorablePct(result) {
-  return result.bands?.find((band) => semanticBand(band.label) === 'unfavorable')?.pct || 0;
+function levelTone(level) {
+  if (level === 'RIESGO_ALTO') return { label: 'Riesgo alto', color: COLORS.unfavorable, bg: 'rgba(224,89,89,.12)' };
+  if (level === 'FACTOR_PROTECTOR') return { label: 'Factor protector', color: COLORS.favorable, bg: 'rgba(36,168,134,.12)' };
+  if (level === 'RIESGO_MEDIO') return { label: 'Riesgo medio', color: '#9A6900', bg: 'rgba(242,184,75,.18)' };
+  return { label: 'Revisión', color: '#64748B', bg: '#F1F5F9' };
 }
 
-function DimensionDistributionRow({ result }) {
-  const bands = [...(result.bands || [])].sort((a, b) => semanticBandOrder(a.label) - semanticBandOrder(b.label));
+function actionFor(name) {
+  const token = name.toLowerCase();
+  if (token.includes('ritmo') || token.includes('exigencia')) return 'Revisar dotación, carga y pausas por turno.';
+  if (token.includes('rol') || token.includes('influencia')) return 'Clarificar funciones y ampliar participación operativa.';
+  if (token.includes('liderazgo') || token.includes('apoyo')) return 'Entrenar supervisión y formalizar rutinas de apoyo.';
+  if (token.includes('confianza') || token.includes('justicia')) return 'Reforzar transparencia, consulta y criterios de decisión.';
+  if (token.includes('inseguridad') || token.includes('compens')) return 'Comunicar cambios laborales y revisar mecanismos de reconocimiento.';
+  return 'Diseñar una intervención organizacional específica y medible.';
+}
+
+function SectionHeading({ kicker, title, description, action }) {
   return (
-    <div className="py-2.5">
-      <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-        <span className="font-semibold text-dark">{result.construct_name}</span>
-        <span className="text-muted">n = {result.n_valid}</span>
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-amber">{kicker}</p>
+        <h2 className="mt-1 text-lg font-extrabold tracking-tight text-dark">{title}</h2>
+        {description ? <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">{description}</p> : null}
       </div>
-      {result.suppressed ? (
-        <div className="flex h-6 items-center justify-center rounded-md bg-surfaceSoft text-[11px] text-muted">
-          Suprimido por privacidad
-        </div>
-      ) : (
-        <div className="flex h-6 overflow-hidden rounded-md border border-border">
-          {bands.map((band) => (
-            <div
-              key={band.label}
-              className="flex items-center justify-center text-[10px] font-bold text-white"
-              style={{ width: `${band.pct || 0}%`, background: band.color_hint || semanticBandColor(band.label) }}
-              title={`${band.label}: ${formatPercent(band.pct)}`}
-            >
-              {(band.pct || 0) >= 12 ? formatPercent(band.pct, { decimals: 0 }) : ''}
-            </div>
-          ))}
-        </div>
-      )}
+      {action}
     </div>
   );
 }
 
-function PriorityTable({ rows }) {
+function ExecutiveMetric({ icon: Icon, label, value, detail, tone = 'amber' }) {
+  const styles = tone === 'danger'
+    ? 'from-[#FCE8E8] to-white text-danger'
+    : tone === 'turquoise'
+      ? 'from-[#E3F7F5] to-white text-turquoise'
+      : 'from-[#FFF5D9] to-white text-yellowDark';
   return (
-    <TableContainer>
-      <Table>
-        <THead>
-          <Tr>
-            <Th>#</Th>
-            <Th>Dimensión</Th>
-            <Th align="right">n</Th>
-            <Th align="right">% desfavorable</Th>
-            <Th>Nivel dominante</Th>
-          </Tr>
-        </THead>
+    <div className={`rounded-2xl border border-white/70 bg-gradient-to-br ${styles} p-4 shadow-[0_12px_30px_rgba(24,50,56,.07)]`}>
+      <div className="flex items-start justify-between gap-3">
+        <div><p className="text-[10px] font-extrabold uppercase tracking-[0.12em] opacity-70">{label}</p><p className="mt-2 text-2xl font-black tracking-tight text-dark">{value}</p></div>
+        <span className="rounded-xl bg-white/80 p-2 shadow-sm"><Icon size={17} /></span>
+      </div>
+      <p className="mt-2 text-[11px] leading-4 text-muted">{detail}</p>
+    </div>
+  );
+}
+
+function DistributionBar({ row }) {
+  return (
+    <div className="flex h-7 min-w-[260px] overflow-hidden rounded-lg border border-white shadow-inner">
+      {[
+        ['favorable_pct', COLORS.favorable],
+        ['intermediate_pct', COLORS.intermediate],
+        ['unfavorable_pct', COLORS.unfavorable],
+      ].map(([key, color]) => {
+        const value = Number(row[key] || 0);
+        return value > 0 ? <div key={key} style={{ width: `${value}%`, backgroundColor: color }} className="flex items-center justify-center text-[10px] font-extrabold text-white">{value >= 9 ? pct(value, 0) : ''}</div> : null;
+      })}
+    </div>
+  );
+}
+
+function DimensionTable({ rows }) {
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-border/80 bg-white">
+      <table className="min-w-[1120px] w-full text-left text-xs">
+        <thead className="bg-[#16363A] text-white">
+          <tr>
+            {['Dim.', 'Dimensión', 'n', 'Favorable n (%)', 'Intermedio n (%)', 'Desfavorable n (%)', 'Distribución', 'Puntaje', 'IC 95% desf.', 'Nivel'].map((label) => <th key={label} className="px-3 py-3 font-bold">{label}</th>)}
+          </tr>
+        </thead>
         <tbody>
-          {rows.map((result, index) => {
-            const dominant = dominantBand(result);
+          {rows.map((row) => {
+            const interval = wilsonInterval(row.unfavorable_n, row.n_valid);
+            const tone = levelTone(row.collective_classification);
             return (
-              <Tr key={result.construct_id}>
-                <Td className="font-semibold text-muted">{result.priority_rank ?? index + 1}</Td>
-                <Td className="font-medium text-dark">{result.construct_name}</Td>
-                <Td align="right">{result.n_valid}</Td>
-                <Td align="right" className="font-mono font-semibold text-dark">
-                  {formatPercent(unfavorablePct(result), { decimals: 1 })}
-                </Td>
-                <Td>
-                  {dominant ? (
-                    <span
-                      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
-                      style={{ background: dominant.color_hint || semanticBandColor(dominant.label) }}
-                    >
-                      {dominant.label}
-                    </span>
-                  ) : (
-                    '—'
-                  )}
-                </Td>
-              </Tr>
+              <tr key={row.construct_id} className="border-t border-border/70 align-middle hover:bg-surfaceSoft/60">
+                <td className="px-3 py-3 font-mono font-bold text-muted">{row.construct_code}</td>
+                <td className="max-w-[220px] px-3 py-3 font-semibold text-dark">{row.construct_name}</td>
+                <td className="px-3 py-3 font-mono">{row.n_valid}</td>
+                <td className="px-3 py-3 font-mono text-emerald-700">{row.favorable_n} ({pct(row.favorable_pct)})</td>
+                <td className="px-3 py-3 font-mono text-yellowDark">{row.intermediate_n} ({pct(row.intermediate_pct)})</td>
+                <td className="px-3 py-3 font-mono text-danger">{row.unfavorable_n} ({pct(row.unfavorable_pct)})</td>
+                <td className="px-3 py-3"><DistributionBar row={row} /></td>
+                <td className="px-3 py-3 font-mono font-bold">{number(row.construct_score)} / 100</td>
+                <td className="px-3 py-3 font-mono">{number(interval[0])}–{number(interval[1])}%</td>
+                <td className="px-3 py-3"><span className="inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-extrabold" style={{ color: tone.color, backgroundColor: tone.bg }}>{tone.label}</span></td>
+              </tr>
             );
           })}
         </tbody>
-      </Table>
-    </TableContainer>
+      </table>
+    </div>
   );
 }
 
-function SpearmanCard({ studyId }) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const mutation = useMutation({
-    mutationFn: () => runSpearmanMatrix(studyId, { include_points: false }),
-    onSuccess: () => setSelectedIndex(0),
-    meta: { skipGlobalToast: true },
-  });
-
+function SubdimensionTable({ rows }) {
   return (
-    <Card>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-dark">¿Qué dimensiones se mueven juntas?</p>
-          <p className="mt-1 text-xs text-muted">Matriz de correlación de Spearman · exploratoria, no causal.</p>
-        </div>
-        <Button loading={mutation.isPending} onClick={() => mutation.mutate()} size="sm" type="button" variant="secondary">
-          <Sparkles size={14} /> Calcular matriz
-        </Button>
-      </div>
-      {mutation.isError ? <p className="mt-3 text-xs font-medium text-danger">{mutation.error?.message}</p> : null}
-      {mutation.data ? (
-        <div className="mt-4">
-          <SpearmanMatrix
-            variables={mutation.data.variables}
-            cells={mutation.data.cells}
-            selectedIndex={selectedIndex}
-            onSelect={setSelectedIndex}
-          />
-          {mutation.data.excluded?.map((message) => (
-            <p key={message} className="mt-2 text-xs text-danger">{message}</p>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-4 rounded-xl border border-dashed border-border p-5 text-sm text-muted">
-          Calcula la matriz para ver qué dimensiones correlacionan entre sí.
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function SegmentationCard({ studyId, rankableVariables }) {
-  const [variableIds, setVariableIds] = useState([]);
-  const [k, setK] = useState(3);
-
-  const mutation = useMutation({
-    mutationFn: () => runAnalysis('kmeans', studyId, { variable_ids: variableIds, k }),
-    meta: { skipGlobalToast: true },
-  });
-
-  const toggle = (id) => setVariableIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
-
-  const result = mutation.data?.results?.[0];
-  const clusterData = result?.result_data;
-
-  return (
-    <Card>
-      <div>
-        <p className="text-sm font-semibold text-dark">Segmentos exploratorios</p>
-        <p className="mt-1 text-xs text-muted">
-          Agrupa patrones parecidos con k-means sobre variables ordinales o de escala. No clasifica ni diagnostica personas.
-        </p>
-      </div>
-
-      {rankableVariables.length ? (
-        <div className="mt-3">
-          <p className="colmena-label mb-2">Variables a agrupar</p>
-          <div className="flex flex-wrap gap-2">
-            {rankableVariables.map((variable) => (
-              <button
-                key={variable.id}
-                type="button"
-                onClick={() => toggle(variable.id)}
-                className={`colmena-badge cursor-pointer ${
-                  variableIds.includes(variable.id) ? 'bg-amber text-white' : 'bg-amber/10 text-yellowDark'
-                }`}
-              >
-                {variable.code}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <p className="mt-3 text-xs text-muted">Este proyecto no tiene variables ordinales o de escala para segmentar.</p>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="colmena-label">Segmentos (k)</span>
-          <div className="flex rounded-lg bg-surfaceSoft p-0.5">
-            {K_OPTIONS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={`colmena-pill-tab ${k === option ? 'active' : ''}`}
-                onClick={() => setK(option)}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </div>
-        <Button
-          disabled={variableIds.length === 0}
-          loading={mutation.isPending}
-          onClick={() => mutation.mutate()}
-          size="sm"
-          type="button"
-        >
-          <Layers size={14} /> Calcular segmentos
-        </Button>
-      </div>
-
-      {mutation.isError ? <p className="mt-3 text-xs font-medium text-danger">{mutation.error?.message}</p> : null}
-
-      {clusterData ? (
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {clusterData.cluster_sizes.map((size, clusterIndex) => {
-            const share = clusterData.n ? Math.round((size / clusterData.n) * 100) : 0;
+    <div className="overflow-x-auto rounded-2xl border border-border/80 bg-white">
+      <table className="min-w-[900px] w-full text-left text-xs">
+        <thead className="bg-surfaceSoft text-dark">
+          <tr>{['Prioridad', 'Código', 'Subdimensión', 'Dim.', 'n', '% favorable', '% intermedio', '% desfavorable', 'Puntaje', 'Nivel', 'Pregunta preventiva'].map((label) => <th key={label} className="px-3 py-3 font-bold">{label}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => {
+            const tone = levelTone(row.collective_classification);
             return (
-              <div key={clusterIndex} className="rounded-2xl border border-border p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-dark">Segmento {clusterIndex + 1}</p>
-                  <span className="text-xs text-muted">n = {size} · {share}%</span>
-                </div>
-                <dl className="mt-3 space-y-1.5 text-xs">
-                  {clusterData.variable_codes.map((code, varIndex) => {
-                    const variable = rankableVariables.find((item) => item.code === code);
-                    return (
-                      <div key={code} className="flex items-center justify-between gap-2">
-                        <dt className="truncate text-muted">{variable?.name || code}</dt>
-                        <dd className="shrink-0 font-mono font-semibold text-dark">
-                          {formatNumber(clusterData.centroids[clusterIndex]?.[varIndex], { decimals: 2 })}
-                        </dd>
-                      </div>
-                    );
-                  })}
-                </dl>
-              </div>
+              <tr key={row.construct_id} className="border-t border-border/70 align-top hover:bg-surfaceSoft/50">
+                <td className="px-3 py-3"><span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-dark text-[10px] font-extrabold text-white">{index + 1}</span></td>
+                <td className="px-3 py-3 font-mono text-muted">{row.construct_code}</td>
+                <td className="px-3 py-3 font-semibold text-dark">{row.construct_name}</td>
+                <td className="px-3 py-3 font-mono">{row.dimension_code}</td>
+                <td className="px-3 py-3 font-mono">{row.n_valid}</td>
+                <td className="px-3 py-3 font-mono text-emerald-700">{pct(row.favorable_pct)}</td>
+                <td className="px-3 py-3 font-mono text-yellowDark">{pct(row.intermediate_pct)}</td>
+                <td className="px-3 py-3 font-mono font-bold text-danger">{pct(row.unfavorable_pct)}</td>
+                <td className="px-3 py-3 font-mono">{number(row.construct_score)}</td>
+                <td className="px-3 py-3"><span className="rounded-full px-2 py-1 text-[10px] font-bold" style={{ color: tone.color, backgroundColor: tone.bg }}>{tone.label}</span></td>
+                <td className="max-w-[260px] px-3 py-3 leading-5 text-muted">{actionFor(row.construct_name)}</td>
+              </tr>
             );
           })}
-          <p className="text-[11px] text-muted sm:col-span-2">
-            Los valores por segmento son el centroide (promedio) de cada variable seleccionada. Un segmento con pocos
-            casos puede acercarse a identificar personas — interprétalo con cautela.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-4 rounded-xl border border-dashed border-border p-5 text-sm text-muted">
-          Elige al menos una variable y calcula para ver los segmentos.
-        </div>
-      )}
-    </Card>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Heatmap({ rows, dimensions, thresholds }) {
+  const warning = Number(thresholds?.risk_warning || 35);
+  const critical = Number(thresholds?.risk_critical || 50);
+  const units = [...new Map(rows.map((row) => [row.unit_id, { id: row.unit_id, name: row.unit_name }])).values()];
+  const map = new Map(rows.map((row) => [`${row.construct_id}:${row.unit_id}`, row]));
+  const heat = (value) => {
+    if (value >= critical) return { background: '#E05959', color: 'white' };
+    if (value >= warning) return { background: '#F5C85B', color: '#563B00' };
+    return { background: '#BDE8D9', color: '#145B4B' };
+  };
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-border bg-white">
+      <table className="min-w-[760px] w-full text-xs">
+        <thead><tr className="bg-[#16363A] text-white"><th className="px-3 py-3 text-left">Dimensión</th>{units.map((unit) => <th key={unit.id} className="px-3 py-3 text-center">{unit.name}<span className="mt-1 block text-[9px] font-normal text-white/60">n = {rows.find((row) => row.unit_id === unit.id)?.n_valid || '—'}</span></th>)}</tr></thead>
+        <tbody>{dimensions.map((dimension) => <tr key={dimension.construct_id} className="border-t border-border"><td className="px-3 py-3 font-semibold text-dark"><span className="mr-2 font-mono text-muted">{dimension.construct_code}</span>{dimension.construct_name}</td>{units.map((unit) => { const value = map.get(`${dimension.construct_id}:${unit.id}`); return <td key={unit.id} className="p-2"><div className="rounded-lg px-2 py-3 text-center font-mono font-extrabold" style={value?.suppressed ? { background: '#E2E8F0', color: '#64748B' } : heat(Number(value?.unfavorable_pct || 0))}>{value?.suppressed ? 'Suprimido' : pct(value?.unfavorable_pct || 0)}</div></td>; })}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function QualityTable({ telemetry, expectedWorkers, officialEnabled, minimumCell }) {
+  const valid = telemetry?.valid_count || 0;
+  const coverage = expectedWorkers ? (valid / expectedWorkers) * 100 : null;
+  const rows = [
+    ['Cobertura válida', coverage === null ? 'Sin marco' : pct(coverage), '≥ 80% recomendado', coverage !== null && coverage >= 80 ? 'Cumple' : 'Vigilar'],
+    ['Completitud de sesiones', pct((telemetry?.completion_rate || 0) * 100), '≥ 90%', (telemetry?.completion_rate || 0) >= .9 ? 'Cumple' : 'Vigilar'],
+    ['Casos excluidos', String(telemetry?.excluded_count ?? 0), 'Trazabilidad visible', 'Cumple'],
+    ['Duración promedio', duration(telemetry?.avg_duration_seconds), 'Revisar respuestas extremas', 'Informativo'],
+    ['Celda mínima por área', `n = ${minimumCell || '—'}`, 'n ≥ 5', minimumCell >= 5 ? 'Cumple' : 'Suprimida'],
+    ['Consistencia interna', 'No calculada', 'α/ω con reglas oficiales', 'Pendiente'],
+    ['Equivalencia oficial', officialEnabled ? 'Habilitada' : 'Deshabilitada', 'Manifiesto + baremo autorizado', officialEnabled ? 'Cumple' : 'Demo'],
+  ];
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-white">
+      <table className="w-full text-left text-xs"><thead className="bg-surfaceSoft"><tr>{['Control', 'Resultado', 'Criterio', 'Estado'].map((label) => <th key={label} className="px-4 py-3 font-bold">{label}</th>)}</tr></thead><tbody>{rows.map(([label, value, rule, state]) => <tr key={label} className="border-t border-border"><td className="px-4 py-3 font-semibold text-dark">{label}</td><td className="px-4 py-3 font-mono">{value}</td><td className="px-4 py-3 text-muted">{rule}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${state === 'Cumple' ? 'bg-emerald-50 text-emerald-700' : state === 'Vigilar' ? 'bg-amber/15 text-yellowDark' : 'bg-slate-100 text-slate-600'}`}>{state}</span></td></tr>)}</tbody></table>
+    </div>
   );
 }
 
@@ -277,143 +256,138 @@ export default function ProjectPremiumDashboardPage() {
   useActiveProject(projectId);
   const [studyId, setStudyId] = useState(null);
 
-  const { data: project, isLoading: isLoadingProject } = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => getProject(projectId),
-  });
-  const { data: telemetry } = useQuery({
-    queryKey: ['projectTelemetry', projectId],
-    queryFn: () => getProjectTelemetry(projectId),
-    enabled: Boolean(projectId),
-  });
-  const { data: overview, isLoading: isLoadingOverview } = useQuery({
-    queryKey: ['resultsOverview', studyId],
-    queryFn: () => getResultsOverview(studyId),
-    enabled: Boolean(studyId),
-  });
-  const { data: variablesData } = useQuery({
-    queryKey: ['variables', projectId],
-    queryFn: () => listVariables(projectId, { page: 1, pageSize: 200 }),
-    enabled: Boolean(projectId),
-  });
+  const { data: project, isLoading: isLoadingProject } = useQuery({ queryKey: ['project', projectId], queryFn: () => getProject(projectId) });
+  const { data: studiesPage } = useQuery({ queryKey: ['studies', projectId, 'premium'], queryFn: () => listStudies(projectId, { page: 1, pageSize: 100 }) });
+  const { data: telemetry } = useQuery({ queryKey: ['projectTelemetry', projectId], queryFn: () => getProjectTelemetry(projectId), enabled: Boolean(projectId) });
+  const { data: overview, isLoading: overviewLoading } = useQuery({ queryKey: ['resultsOverview', studyId], queryFn: () => getResultsOverview(studyId), enabled: Boolean(studyId) });
+  const { data: censopas, isLoading: censopasLoading } = useQuery({ queryKey: ['censopasResults', studyId], queryFn: () => getCensopasResults(studyId), enabled: Boolean(studyId) });
+  const { data: unitTypes = [] } = useQuery({ queryKey: ['studyUnitTypes', studyId], queryFn: () => listStudyUnitTypes(studyId), enabled: Boolean(studyId) });
+  const areaType = unitTypes.find((item) => item.code === 'AREA') || unitTypes[0];
+  const { data: unitResults } = useQuery({ queryKey: ['censopasUnitResults', studyId, areaType?.id], queryFn: () => getCensopasUnitResults(studyId, areaType.id), enabled: Boolean(studyId && areaType?.id) });
 
-  if (isLoadingProject) return <LoadingState label="Cargando..." />;
+  useEffect(() => {
+    if (!studyId && studiesPage?.items?.length) setStudyId(studiesPage.items[0].id);
+  }, [studyId, studiesPage]);
+
+  const enriched = useMemo(() => {
+    const structure = new Map((overview?.results || []).map((row) => [row.construct_id, row]));
+    return (censopas?.results || []).map((row) => ({ ...structure.get(row.construct_id), ...row }));
+  }, [overview, censopas]);
+
+  if (isLoadingProject) return <LoadingState label="Cargando tablero…" />;
   if (!project) return <ProjectMissingState />;
 
-  const selectedTelemetry = (telemetry?.studies || []).find((study) => study.study_id === studyId);
-  const results = overview?.results || [];
-  const dimensions = results.filter((result) => result.construct_type === 'DIMENSION' && !result.suppressed);
-  const rankableVariables = (variablesData?.items || []).filter((variable) =>
-    ['ORDINAL', 'SCALE'].includes(variable.measurement_level),
-  );
-
-  const priorityDimensions = dimensions.filter((result) => semanticBand(dominantBand(result)?.label) === 'unfavorable');
-  const worstGap = [...dimensions].sort((a, b) => unfavorablePct(b) - unfavorablePct(a))[0];
-  const priorityRows = [...dimensions].sort((a, b) => {
-    const rankA = a.priority_rank ?? Infinity;
-    const rankB = b.priority_rank ?? Infinity;
-    if (rankA !== rankB) return rankA - rankB;
-    return unfavorablePct(b) - unfavorablePct(a);
-  });
-
-  const coveragePct = selectedTelemetry?.started_count
-    ? Math.round((selectedTelemetry.valid_count / selectedTelemetry.started_count) * 100)
-    : null;
+  const selectedTelemetry = (telemetry?.studies || []).find((item) => Number(item.study_id) === Number(studyId));
+  const dimensions = enriched.filter((row) => row.construct_type === 'DIMENSION' && !row.suppressed).sort((a, b) => a.construct_code.localeCompare(b.construct_code));
+  const dimensionById = new Map(dimensions.map((row) => [row.construct_id, row]));
+  const subdimensions = enriched.filter((row) => row.construct_type === 'SUBDIMENSION' && !row.suppressed).map((row) => ({ ...row, dimension_code: dimensionById.get(row.parent_id)?.construct_code || '—' })).sort((a, b) => Number(b.unfavorable_pct || 0) - Number(a.unfavorable_pct || 0));
+  const unitDimensionRows = (unitResults?.results || []).filter((row) => dimensions.some((dimension) => dimension.construct_id === row.construct_id));
+  const expectedWorkers = Number(project.metadata?.expected_worker_count || 0) || null;
+  const thresholds = {
+    coverage_target: 85,
+    coverage_critical: 65,
+    completion_target: 90,
+    risk_warning: 35,
+    risk_critical: 50,
+    ...(project.metadata?.thresholds || {}),
+  };
+  const validCount = selectedTelemetry?.valid_count || overview?.n_completed || 0;
+  const coverage = expectedWorkers ? (validCount / expectedWorkers) * 100 : null;
+  const highRiskSubdimensions = subdimensions.filter((row) => Number(row.unfavorable_pct || 0) >= Number(thresholds.risk_critical) || row.collective_classification === 'RIESGO_ALTO');
+  const highestRisk = subdimensions[0];
+  const minimumCell = unitDimensionRows.length ? Math.min(...unitDimensionRows.map((row) => row.n_valid)) : null;
+  const chartDimensions = dimensions.map((row) => ({ name: row.construct_code, favorable: row.favorable_pct, intermedio: row.intermediate_pct, desfavorable: row.unfavorable_pct, score: row.construct_score }));
+  const radarData = dimensions.map((row) => ({ dimension: row.construct_code, riesgo: Number(row.construct_score || 0), fullMark: 100 }));
+  const topTen = subdimensions.slice(0, 10).map((row) => ({ name: row.construct_name, desfavorable: row.unfavorable_pct, score: row.construct_score }));
+  const loading = overviewLoading || censopasLoading;
 
   return (
-    <div className="colmena-page">
-      <PageHeader
-        eyebrow="Tablero premium"
-        title={project.name}
-        description="Resumen de decisión: participación, distribución oficial por dimensión, prioridades y análisis exploratorios en una sola vista."
-      />
+    <div className="colmena-page pb-16">
+      <PageHeader eyebrow="Expediente analítico · CENSOPAS-COPSOQ" title={project.name} description="Dashboard ejecutivo, resultados por dimensión y subdimensión, precisión, segmentación segura y Balanced Scorecard preventivo." actions={<Link to={`/colmena/project/${projectId}/reports`}><Button size="sm"><FileText size={14} /> Generar expediente</Button></Link>} />
 
-      <Card>
-        <StudySelector projectId={projectId} studyId={studyId} onStudyChange={setStudyId} />
+      <Card className="overflow-hidden border-0 bg-gradient-to-br from-[#102F33] via-[#183E42] to-[#17635F] p-0 text-white shadow-[0_28px_70px_rgba(16,47,51,.22)]">
+        <div className="grid gap-6 p-6 lg:grid-cols-[1.35fr_.65fr] lg:p-8">
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#8FE4DD]">Panel ejecutivo · datos sintéticos</p>
+            <h2 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">Diagnóstico psicosocial para decisión preventiva</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/70">Versión {overview?.instrument_version_code || '—'} · {validCount} registros válidos · privacidad n ≥ {overview?.min_publishable_n || 5}. Umbrales exploratorios sin equivalencia oficial.</p>
+            <div className="mt-5 flex flex-wrap gap-2">{['Dashboard', 'Dimensiones', '20 subdimensiones', 'Áreas', 'Precisión', 'BSC'].map((label) => <a key={label} href={`#${label.toLowerCase().replace('20 ', '').replace('á', 'a').replace('ó', 'o')}`} className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-bold text-white/80 backdrop-blur-xl hover:bg-white/20">{label}</a>)}</div>
+          </div>
+          <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-xl">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-white/55">Aplicación analizada</p>
+            <div className="mt-3 [&_label]:text-white/70 [&_select]:border-white/20 [&_select]:bg-white/10 [&_select]:text-white"><StudySelector projectId={projectId} studyId={studyId} onStudyChange={setStudyId} /></div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs"><div className="rounded-xl bg-black/15 p-3"><span className="block text-white/50">Algoritmo</span><strong className="mt-1 block">CENSOPAS v2</strong></div><div className="rounded-xl bg-black/15 p-3"><span className="block text-white/50">Estado</span><strong className="mt-1 block">Provisional</strong></div></div>
+          </div>
+        </div>
       </Card>
 
-      {!studyId ? (
-        <Card>
-          <EmptyState title="Elige una aplicación o estudio." description="El tablero se arma con la telemetría y los resultados calculados de esa aplicación." />
-        </Card>
-      ) : isLoadingOverview ? (
-        <LoadingState label="Cargando tablero…" />
-      ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            <MetricCard icon={Users} label="Respuestas válidas" value={selectedTelemetry?.valid_count ?? '—'} />
-            <MetricCard icon={Activity} label="Tasa de válidas" value={coveragePct === null ? '—' : `${coveragePct}%`} />
-            <MetricCard
-              icon={AlertTriangle}
-              label="Dimensiones en nivel desfavorable"
-              value={dimensions.length ? `${priorityDimensions.length} / ${dimensions.length}` : '—'}
-            />
-            <MetricCard
-              icon={Target}
-              label="Mayor brecha"
-              value={worstGap ? `${formatPercent(unfavorablePct(worstGap), { decimals: 0 })}` : '—'}
-            />
-            <MetricCard icon={Clock} label="Duración promedio" value={formatDuration(selectedTelemetry?.avg_duration_seconds)} />
-          </div>
-          {worstGap ? <p className="text-xs text-muted">Mayor brecha: {worstGap.construct_name} · n = {worstGap.n_valid}</p> : null}
+      {!studyId || loading ? <LoadingState label="Construyendo expediente estadístico…" /> : !dimensions.length ? <Card><EmptyState title="No hay resultados CENSOPAS calculados" description="Ejecuta el scoring del estudio para activar el tablero." /></Card> : <>
+        <section id="dashboard" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <ExecutiveMetric icon={Users} label="Válidas" value={validCount} detail={`de ${expectedWorkers || 'marco no informado'} trabajadores`} tone="turquoise" />
+          <ExecutiveMetric icon={Activity} label="Cobertura" value={coverage === null ? '—' : pct(coverage)} detail="denominador del centro visible" />
+          <ExecutiveMetric icon={CheckCircle2} label="Completitud" value={pct((selectedTelemetry?.completion_rate || 0) * 100)} detail={`${selectedTelemetry?.excluded_count || 0} sesiones excluidas`} tone="turquoise" />
+          <ExecutiveMetric icon={AlertTriangle} label="Riesgo alto" value={highRiskSubdimensions.length} detail={`de ${subdimensions.length} subdimensiones`} tone="danger" />
+          <ExecutiveMetric icon={Target} label="Mayor brecha" value={highestRisk ? pct(highestRisk.unfavorable_pct) : '—'} detail={highestRisk?.construct_name || 'Sin datos'} tone="danger" />
+          <ExecutiveMetric icon={Clock} label="Tiempo medio" value={duration(selectedTelemetry?.avg_duration_seconds)} detail="por sesión completada" />
+        </section>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
-            <Card>
-              <p className="text-sm font-semibold text-dark">Avance de participación</p>
-              <p className="mb-4 mt-1 text-xs text-muted">Sesiones iniciadas y completadas por día, de toda la aplicación.</p>
-              {selectedTelemetry?.series?.length ? (
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={selectedTelemetry.series}>
-                      <defs>
-                        <linearGradient id="premiumStarted" x1="0" x2="0" y1="0" y2="1">
-                          <stop offset="0%" stopColor="#F5B21A" stopOpacity={0.32} />
-                          <stop offset="100%" stopColor="#F5B21A" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke="rgba(148,163,184,0.22)" strokeDasharray="3 3" />
-                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                      <Tooltip />
-                      <Area dataKey="started" name="Iniciadas" stroke="#F5B21A" fill="url(#premiumStarted)" strokeWidth={2} />
-                      <Area dataKey="completed" name="Completadas" stroke="#11B7B2" fill="transparent" strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <EmptyState title="Sin evolución todavía" description="La serie aparecerá con las primeras sesiones." />
-              )}
-            </Card>
-
-            <Card>
-              <p className="text-sm font-semibold text-dark">Distribución oficial por dimensión</p>
-              <p className="mb-1 mt-1 text-xs text-muted">Capa metodológica · favorable / intermedio / desfavorable.</p>
-              {dimensions.length ? (
-                <div className="mt-2 divide-y divide-border/70">
-                  {dimensions.map((result) => <DimensionDistributionRow key={result.construct_id} result={result} />)}
-                </div>
-              ) : (
-                <EmptyState title="Sin resultados aún" description="Calcula el scoring en Resultados → Baremos." />
-              )}
-            </Card>
-          </div>
-
+        <section id="dimensiones">
           <Card>
-            <p className="text-sm font-semibold text-dark">Priorización</p>
-            <p className="mb-3 mt-1 text-xs text-muted">
-              Ordenado por prioridad calculada por el backend (o por % desfavorable si aún no hay baremo). No reemplaza el juicio técnico del equipo responsable.
-            </p>
-            {priorityRows.length ? <PriorityTable rows={priorityRows} /> : (
-              <EmptyState title="Sin dimensiones publicables" description="Calcula el scoring para ver la priorización." />
-            )}
+            <SectionHeading kicker="8.4 Resultados por dimensión" title="Distribución de niveles y precisión" description="La tabla reproduce el orden de lectura del modelo: denominador, conteos, porcentajes, distribución, puntaje, intervalo de confianza y clasificación." />
+            <div className="grid gap-5 xl:grid-cols-[1.55fr_.75fr]">
+              <div className="h-[360px] rounded-2xl border border-border bg-white p-4"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartDimensions} layout="vertical" margin={{ left: 18, right: 16 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" domain={[0, 100]} tickFormatter={(value) => `${value}%`} /><YAxis dataKey="name" type="category" width={42} /><Tooltip formatter={(value) => pct(value)} /><Legend /><Bar dataKey="favorable" name="Favorable" stackId="risk" fill={COLORS.favorable}><LabelList dataKey="favorable" position="center" formatter={(value) => value >= 9 ? pct(value, 0) : ''} fill="#fff" fontSize={10} /></Bar><Bar dataKey="intermedio" name="Intermedio" stackId="risk" fill={COLORS.intermediate}><LabelList dataKey="intermedio" position="center" formatter={(value) => value >= 9 ? pct(value, 0) : ''} fill="#fff" fontSize={10} /></Bar><Bar dataKey="desfavorable" name="Desfavorable" stackId="risk" fill={COLORS.unfavorable}><LabelList dataKey="desfavorable" position="center" formatter={(value) => value >= 9 ? pct(value, 0) : ''} fill="#fff" fontSize={10} /></Bar></BarChart></ResponsiveContainer></div>
+              <div className="h-[360px] rounded-2xl border border-border bg-gradient-to-br from-surfaceSoft to-white p-4"><p className="mb-2 text-center text-xs font-bold text-dark">Índice analítico 0–100</p><ResponsiveContainer width="100%" height="92%"><RadarChart data={radarData}><PolarGrid stroke="#CBD5E1" /><PolarAngleAxis dataKey="dimension" tick={{ fontSize: 11, fontWeight: 700 }} /><Radar dataKey="riesgo" stroke={COLORS.turquoise} fill={COLORS.turquoise} fillOpacity={0.28} /></RadarChart></ResponsiveContainer></div>
+            </div>
+            <div className="mt-5"><DimensionTable rows={dimensions} /></div>
+            <p className="mt-3 text-[11px] leading-5 text-muted">IC 95%: intervalo de Wilson para la proporción desfavorable. En este demo los umbrales son exploratorios; la equivalencia oficial permanece bloqueada.</p>
           </Card>
+        </section>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <SpearmanCard studyId={studyId} />
-            <SegmentationCard studyId={studyId} rankableVariables={rankableVariables} />
-          </div>
-        </>
-      )}
+        <section id="subdimensiones">
+          <Card>
+            <SectionHeading kicker="8.6–8.7 Subdimensiones" title="Ranking completo de veinte subdimensiones" description="Ordenamiento por porcentaje desfavorable, manteniendo dimensión de origen, n, puntaje y pregunta preventiva." />
+            <div className="mb-5 h-[430px] rounded-2xl border border-border bg-white p-4"><ResponsiveContainer width="100%" height="100%"><BarChart data={topTen} layout="vertical" margin={{ left: 120, right: 30 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" domain={[0, 100]} tickFormatter={(value) => `${value}%`} /><YAxis dataKey="name" type="category" width={160} tick={{ fontSize: 10 }} /><Tooltip formatter={(value) => pct(value)} /><Bar dataKey="desfavorable" name="% desfavorable" fill={COLORS.unfavorable} radius={[0, 7, 7, 0]}><LabelList dataKey="desfavorable" position="right" formatter={(value) => pct(value)} fill={COLORS.ink} fontSize={10} fontWeight={700} /></Bar></BarChart></ResponsiveContainer></div>
+            <SubdimensionTable rows={subdimensions} />
+          </Card>
+        </section>
+
+        <section id="areas">
+          <Card>
+            <SectionHeading kicker="8.8–8.9 Localización" title="Mapa de calor por área" description="Porcentaje desfavorable por dimensión y área. Cada encabezado muestra el denominador; las celdas menores al umbral se suprimen desde el backend." />
+            {unitDimensionRows.length ? <Heatmap rows={unitDimensionRows} dimensions={dimensions} thresholds={thresholds} /> : <EmptyState title="Sin desglose publicable por área" description="Configura unidades y respeta n ≥ 5 para activar el mapa." />}
+            <div className="mt-4 flex flex-wrap gap-3 text-[11px]"><span className="rounded-full bg-[#BDE8D9] px-3 py-1 font-bold text-[#145B4B]">&lt; 25% · menor prioridad</span><span className="rounded-full bg-[#F5C85B] px-3 py-1 font-bold text-[#563B00]">25–49,9% · vigilancia</span><span className="rounded-full bg-[#E05959] px-3 py-1 font-bold text-white">≥ 50% · prioridad alta</span></div>
+          </Card>
+        </section>
+
+        <section id="precision" className="grid gap-4 xl:grid-cols-[1.05fr_.95fr]">
+          <Card>
+            <SectionHeading kicker="Calidad" title="Control estadístico y gobernanza" description="El reporte declara qué se calculó, qué falta y qué análisis no debe habilitarse todavía." />
+            <QualityTable telemetry={selectedTelemetry} expectedWorkers={expectedWorkers} officialEnabled={censopas?.official_equivalence_enabled} minimumCell={minimumCell} />
+          </Card>
+          <Card>
+            <SectionHeading kicker="Participación" title="Evolución de captura" description="Sesiones iniciadas y completadas por fecha, con el mismo denominador del estudio." />
+            <div className="h-[330px]"><ResponsiveContainer width="100%" height="100%"><AreaChart data={selectedTelemetry?.series || []}><defs><linearGradient id="captureGradient" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor={COLORS.turquoise} stopOpacity={.34} /><stop offset="100%" stopColor={COLORS.turquoise} stopOpacity={.03} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="date" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Legend /><Area type="monotone" dataKey="started" name="Iniciadas" stroke={COLORS.intermediate} fill="transparent" strokeWidth={2} /><Area type="monotone" dataKey="completed" name="Completadas" stroke={COLORS.turquoise} fill="url(#captureGradient)" strokeWidth={2.5} /></AreaChart></ResponsiveContainer></div>
+          </Card>
+        </section>
+
+        <section id="bsc">
+          <Card>
+            <SectionHeading kicker="Balanced Scorecard" title="Tablero preventivo y cartera de intervención" description="Cada hallazgo se convierte en objetivo, línea base, meta, responsable, plazo e indicador verificable." action={<Link to={`/colmena/project/${projectId}/reports`} className="text-xs font-bold text-amber">Abrir expediente →</Link>} />
+            <div className="overflow-x-auto rounded-2xl border border-border bg-white"><table className="min-w-[900px] w-full text-left text-xs"><thead className="bg-[#16363A] text-white"><tr>{['Perspectiva', 'Objetivo', 'Indicador', 'Línea base', 'Meta 90 días', 'Brecha', 'Responsable', 'Semáforo'].map((label) => <th key={label} className="px-3 py-3 font-bold">{label}</th>)}</tr></thead><tbody>{[
+              ['Salud y prevención', 'Reducir focos críticos', 'Subdimensiones en riesgo alto', highRiskSubdimensions.length, Math.max(0, highRiskSubdimensions.length - 2), highRiskSubdimensions.length ? '-2' : '0', 'Comité SST', highRiskSubdimensions.length ? 'Rojo' : 'Verde'],
+              ['Procesos', 'Elevar participación', 'Cobertura válida', coverage === null ? '—' : pct(coverage), '≥ 90%', coverage === null ? 'Sin marco' : `${number(Math.max(0, 90 - coverage))} pp`, 'RR.HH.', coverage !== null && coverage >= 90 ? 'Verde' : 'Ámbar'],
+              ['Liderazgo', 'Cerrar acciones prioritarias', '% acciones verificadas', '0%', '≥ 80%', '80 pp', 'Gerencias de área', 'Rojo'],
+              ['Gobernanza', 'Proteger anonimato', 'Celdas publicadas con n ≥ 5', '100%', '100%', '0 pp', 'Responsable de datos', 'Verde'],
+            ].map((row) => <tr key={row[1]} className="border-t border-border">{row.slice(0,7).map((cell, index) => <td key={index} className={`px-3 py-3 ${index === 1 ? 'font-semibold text-dark' : index >= 3 && index <= 5 ? 'font-mono' : ''}`}>{cell}</td>)}<td className="px-3 py-3"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${row[7] === 'Verde' ? 'bg-emerald-50 text-emerald-700' : row[7] === 'Ámbar' ? 'bg-amber/15 text-yellowDark' : 'bg-red-50 text-danger'}`}>{row[7]}</span></td></tr>)}</tbody></table></div>
+
+            <div className="mt-5 overflow-x-auto rounded-2xl border border-border bg-white"><table className="min-w-[900px] w-full text-left text-xs"><thead className="bg-surfaceSoft"><tr>{['ID', 'Riesgo prioritario', '% desfavorable', 'Medida organizacional', 'Indicador', 'Responsable', 'Plazo', 'Estado'].map((label) => <th key={label} className="px-3 py-3 font-bold">{label}</th>)}</tr></thead><tbody>{subdimensions.slice(0, 6).map((row, index) => <tr key={row.construct_id} className="border-t border-border"><td className="px-3 py-3 font-mono">A-{String(index + 1).padStart(2, '0')}</td><td className="px-3 py-3 font-semibold text-dark">{row.construct_name}</td><td className="px-3 py-3 font-mono font-bold text-danger">{pct(row.unfavorable_pct)}</td><td className="max-w-[280px] px-3 py-3 text-muted">{actionFor(row.construct_name)}</td><td className="px-3 py-3">Reducción del % desfavorable</td><td className="px-3 py-3">Gerencia + SST</td><td className="px-3 py-3 font-mono">90 días</td><td className="px-3 py-3"><span className="rounded-full bg-red-50 px-2 py-1 text-[10px] font-bold text-danger">Pendiente</span></td></tr>)}</tbody></table></div>
+          </Card>
+        </section>
+
+        <Card className="border-amber/25 bg-amber/5">
+          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 shrink-0 text-amber" size={20} /><div><p className="text-sm font-bold text-dark">Lectura metodológica del demo</p><p className="mt-1 text-xs leading-5 text-muted">Los conteos, porcentajes, intervalos y mapas de área provienen de {overview.n_completed} sesiones válidas sintéticas persistidas. La concordancia ítem-subdimensión y los umbrales son exploratorios. No debe presentarse como evaluación oficial ni como expediente SUNAFIL hasta cargar el manifiesto y baremo autorizados.</p></div></div>
+        </Card>
+      </>}
     </div>
   );
 }

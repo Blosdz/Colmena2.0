@@ -90,7 +90,7 @@ from app.services.censopas_service import CensopasScoringService
 from app.services.export_service import ExportService
 from app.services.project_service import ProjectService
 from app.services.report_service import ReportService
-from app.services.scoring_service import ScoringService
+from app.services.scoring_orchestrator import run_canonical_scoring
 from app.services.study_service import StudyService
 from app.services.survey_service import SurveyService
 
@@ -532,11 +532,28 @@ async def reset_instrument_version_content(session: AsyncSession, version_id: in
 
 async def reset_demo(session: AsyncSession) -> None:
     projects = (await session.execute(select(Project))).scalars().all()
+    demo_project_ids = {
+        project.id
+        for project in projects
+        if (project.metadata_ or {}).get("demo_code") in (DEMO_CODE_SHORT, DEMO_CODE_MEDIUM)
+    }
     for project in projects:
-        if (project.metadata_ or {}).get("demo_code") in (DEMO_CODE_SHORT, DEMO_CODE_MEDIUM):
+        if project.id in demo_project_ids:
             print(f"[reset] borrando proyecto demo previo id={project.id} ({project.name})")
             await session.execute(delete(AuditLog).where(AuditLog.project_id == project.id))
             await session.execute(delete(Project).where(Project.id == project.id))
+    # El aprovisionador empresarial relaciona su baremo con el proyecto en
+    # metadata (sin FK). Limpia cualquier baremo que haya quedado huérfano si
+    # una corrida anterior del seed se interrumpió después de crear el proyecto.
+    if demo_project_ids:
+        barems = (await session.execute(select(Barem))).scalars().all()
+        orphan_barem_ids = [
+            barem.id
+            for barem in barems
+            if (barem.metadata_ or {}).get("project_id") in demo_project_ids
+        ]
+        if orphan_barem_ids:
+            await session.execute(delete(Barem).where(Barem.id.in_(orphan_barem_ids)))
     await session.commit()
     await reset_instrument_version_content(session, SHORT_VERSION_ID)
     await reset_instrument_version_content(session, MEDIUM_VERSION_ID)
@@ -592,55 +609,14 @@ async def import_reference_barem(
     )
     imported = await service.import_barem_manifest(version_id, manifest)
     barem_id = imported.barem_id
-
-    bands = []
-    for construct in constructs:
-        bands.extend(
-            [
-                BaremBand(
-                    barem_id=barem_id,
-                    construct_id=construct.id,
-                    code="FAVORABLE",
-                    label="Favorable",
-                    min_value=0,
-                    max_value=33.34,
-                    severity_order=1,
-                    interpretation="Nivel de riesgo psicosocial bajo (demo).",
-                    color_hint="#059669",
-                    classification_code="FAVORABLE",
-                    metadata_={"direction": "LOWER_BETTER", "demo": True},
-                ),
-                BaremBand(
-                    barem_id=barem_id,
-                    construct_id=construct.id,
-                    code="INTERMEDIO",
-                    label="Intermedio",
-                    min_value=33.34,
-                    max_value=66.67,
-                    severity_order=2,
-                    interpretation="Nivel de riesgo psicosocial intermedio (demo).",
-                    color_hint="#D97706",
-                    classification_code="INTERMEDIATE",
-                    metadata_={"direction": "LOWER_BETTER", "demo": True},
-                ),
-                BaremBand(
-                    barem_id=barem_id,
-                    construct_id=construct.id,
-                    code="DESFAVORABLE",
-                    label="Desfavorable",
-                    min_value=66.67,
-                    max_value=100,
-                    severity_order=3,
-                    interpretation="Nivel de riesgo psicosocial elevado (demo); revisar plan preventivo.",
-                    color_hint="#DC2626",
-                    classification_code="UNFAVORABLE",
-                    metadata_={"direction": "LOWER_BETTER", "demo": True},
-                ),
-            ]
-        )
-    session.add_all(bands)
-    await session.commit()
-    print(f"[barem v{version_id}] barem_id={barem_id} cutoffs={len(constructs)} bands={len(bands)}")
+    # import_barem_manifest materializa tanto los cortes autorales como sus
+    # tres bandas ejecutables. No volver a insertarlas aquí: además de ser
+    # redundante, viola la unicidad (barem, constructo, severidad).
+    band_count = len(constructs) * 3
+    print(
+        f"[barem v{version_id}] barem_id={barem_id} "
+        f"cutoffs={len(constructs)} bands={band_count}"
+    )
     return await service.repo.get_barem(barem_id)
 
 
@@ -708,7 +684,12 @@ async def create_base_project(
         ProjectCreate(
             owner_user_id=owner.id,
             name=name,
-            project_type="CENSO",
+            # El servicio aprovisiona automáticamente todo proyecto CENSO con
+            # la versión oficial protegida. Este seed necesita deliberadamente
+            # sus versiones sintéticas 1/2, así que crea primero un CUSTOM y lo
+            # marca como CENSO una vez persistido, sin generar artefactos
+            # oficiales redundantes que apunten a otra versión.
+            project_type="CUSTOM",
             description=(
                 f"Proyecto demo CENSOPAS-COPSOQ ({version_kind}) generado por "
                 f"scripts/seed_censopas_demo.py — {DISCLAIMER}"
@@ -729,9 +710,14 @@ async def create_base_project(
                 # resolverlo; sin esto, Constructor/Formulario ven 0 instrumentos.
                 "instrument_id": 1,
                 "instrument_version_id": version_id,
+                "censopas_auto_provisioned": True,
+                "censopas_provisioning_version": "demo-seed-v1",
             },
         )
     )
+    project.project_type = "CENSO"
+    await session.commit()
+    await session.refresh(project)
 
     survey_service = SurveyService(session)
     survey = await survey_service.create_from_instrument(
@@ -745,6 +731,7 @@ async def create_base_project(
         ),
     )
     survey.status = "ACTIVE"
+    project.metadata_ = {**(project.metadata_ or {}), "survey_id": survey.id}
     await session.commit()
     await session.refresh(survey)
     return project, survey
@@ -902,6 +889,8 @@ async def seed_demo_short(session: AsyncSession, owner: User, build: ManifestBui
 
     barem = await import_reference_barem(session, SHORT_VERSION_ID, "Baremo referencia demo — CENSOPAS corta")
     await study_service.update(study.id, StudyUpdate(barem_id=barem.id))
+    project.metadata_ = {**(project.metadata_ or {}), "barem_id": barem.id}
+    await session.commit()
     study = await study_service.open(study.id)
 
     # 20 invitaciones, todas consumidas (convocados = recibidos = válidos = 20, harness §75).
@@ -1027,13 +1016,9 @@ async def seed_demo_short(session: AsyncSession, owner: User, build: ManifestBui
     session.add_all(session_units)
     await session.commit()
 
-    # Motor CENSOPAS específico (Analítica / unit-results / readiness).
-    censopas_service = CensopasScoringService(session)
-    await censopas_service.run_scoring(study.id)
-    # Motor genérico (Resultados / Baremos, el que consume el frontend hoy).
-    scoring_service = ScoringService(session)
-    _, summary = await scoring_service.run(study.id)
-    print(f"[{DEMO_CODE_SHORT}] scoring genérico: {summary.model_dump()}")
+    # Una única corrida canónica alimenta resultados generales y por unidad.
+    _, summary = await run_canonical_scoring(session, study.id)
+    print(f"[{DEMO_CODE_SHORT}] scoring canónico: {summary.model_dump()}")
 
     await seed_plan_and_bsc_short(session, study)
     await seed_analytics_exports_reports(
@@ -1076,7 +1061,7 @@ async def seed_plan_and_bsc_short(session: AsyncSession, study: Study) -> None:
             responsible_label="Jefatura de Operaciones",
             priority=1,
             due_date=date(2026, 7, 19),
-            status="EN_PROGRESO",
+            status="IN_PROGRESS",
         ),
         ActionPlanItem(
             action_plan_id=plan.id,
@@ -1087,7 +1072,7 @@ async def seed_plan_and_bsc_short(session: AsyncSession, study: Study) -> None:
             responsible_label="Jefatura de Administración",
             priority=2,
             due_date=date(2026, 5, 30),
-            status="VENCIDA",
+            status="PENDING",
         ),
         ActionPlanItem(
             action_plan_id=plan.id,
@@ -1098,7 +1083,7 @@ async def seed_plan_and_bsc_short(session: AsyncSession, study: Study) -> None:
             responsible_label="SST y RR. HH.",
             priority=3,
             due_date=date(2026, 8, 15),
-            status="CUMPLIDA",
+            status="DONE",
         ),
         ActionPlanItem(
             action_plan_id=plan.id,
@@ -1109,7 +1094,7 @@ async def seed_plan_and_bsc_short(session: AsyncSession, study: Study) -> None:
             responsible_label="Comité SST",
             priority=4,
             due_date=date(2026, 9, 30),
-            status="PENDIENTE",
+            status="PENDING",
         ),
     ]
     session.add_all(items)
@@ -1205,6 +1190,8 @@ async def seed_demo_medium(session: AsyncSession, owner: User, build: ManifestBu
 
     barem = await import_reference_barem(session, MEDIUM_VERSION_ID, "Baremo referencia demo — CENSOPAS media")
     await study_service.update(study.id, StudyUpdate(barem_id=barem.id))
+    project.metadata_ = {**(project.metadata_ or {}), "barem_id": barem.id}
+    await session.commit()
     study = await study_service.open(study.id)
 
     # Convocados=200: 186 consumidas (recibidos), 14 sin consumir (no respondieron), harness §28/§37.
@@ -1463,11 +1450,8 @@ async def seed_demo_medium(session: AsyncSession, owner: User, build: ManifestBu
         f"(recibidos={len(valid_sessions) + len(excluded_sessions)}, convocados=200)"
     )
 
-    censopas_service = CensopasScoringService(session)
-    await censopas_service.run_scoring(study.id)
-    scoring_service = ScoringService(session)
-    _, summary = await scoring_service.run(study.id)
-    print(f"[{DEMO_CODE_MEDIUM}] scoring genérico: {summary.model_dump()}")
+    _, summary = await run_canonical_scoring(session, study.id)
+    print(f"[{DEMO_CODE_MEDIUM}] scoring canónico: {summary.model_dump()}")
 
     await seed_plan_and_bsc_medium(session, study)
     await seed_analytics_exports_reports(
@@ -1513,7 +1497,7 @@ async def seed_plan_and_bsc_medium(session: AsyncSession, study: Study) -> None:
             responsible_label="Jefatura de Operaciones",
             priority=1,
             due_date=date(2026, 8, 24),
-            status="EN_PROGRESO",
+            status="IN_PROGRESS",
         ),
         ActionPlanItem(
             action_plan_id=plan.id,
@@ -1524,7 +1508,7 @@ async def seed_plan_and_bsc_medium(session: AsyncSession, study: Study) -> None:
             responsible_label="Jefatura de Operaciones",
             priority=2,
             due_date=date(2026, 9, 10),
-            status="PENDIENTE",
+            status="PENDING",
         ),
         ActionPlanItem(
             action_plan_id=plan.id,
@@ -1535,7 +1519,7 @@ async def seed_plan_and_bsc_medium(session: AsyncSession, study: Study) -> None:
             responsible_label="SST y RR. HH.",
             priority=3,
             due_date=date(2026, 6, 20),
-            status="VENCIDA",
+            status="PENDING",
         ),
         ActionPlanItem(
             action_plan_id=plan.id,
@@ -1545,7 +1529,7 @@ async def seed_plan_and_bsc_medium(session: AsyncSession, study: Study) -> None:
             responsible_label="Comité SST",
             priority=4,
             due_date=date(2026, 10, 15),
-            status="CUMPLIDA",
+            status="DONE",
         ),
     ]
     session.add_all(items)

@@ -18,6 +18,7 @@ from app.schemas.telemetry import (
     TelemetrySeriesPoint,
     VariableTelemetry,
 )
+from app.services.invitation_service import InvitationService
 
 
 class TelemetryService:
@@ -35,6 +36,28 @@ class TelemetryService:
         if study is None:
             raise NotFoundError(f"Estudio {study_id} no encontrado")
         return study
+
+    async def _participation_funnel(
+        self, study: Study, started_count: int, valid_count: int
+    ) -> tuple[int | None, int | None, float | None, float | None]:
+        """Convocados/no-respondió/tasas, sólo si hay una población objetivo
+        contable: estudios con `requires_invitation` e invitaciones emitidas.
+        En estudios de enlace público InvitationService.summary() da 0 aunque
+        haya cientos de respuestas, así que ahí no hay denominador confiable
+        y se devuelve None en vez de fabricar una tasa."""
+        if not study.requires_invitation:
+            return None, None, None, None
+        summary = await InvitationService(self.session).summary(study.id)
+        invited_count = summary["total"]
+        if not invited_count:
+            return None, None, None, None
+        not_responded_count = max(invited_count - started_count, 0)
+        return (
+            invited_count,
+            not_responded_count,
+            started_count / invited_count,
+            valid_count / invited_count,
+        )
 
     @staticmethod
     def _question_ids_by_root(
@@ -100,6 +123,9 @@ class TelemetryService:
             float(s.completion_pct) for s in sessions if s.completion_pct is not None
         ]
         durations = [s.duration_seconds for s in completed if s.duration_seconds is not None]
+        invited_count, not_responded_count, response_rate, valid_rate = (
+            await self._participation_funnel(study, started_count, len(valid))
+        )
 
         by_day: dict = defaultdict(lambda: {"started": 0, "completed": 0})
         for s in sessions:
@@ -215,6 +241,11 @@ class TelemetryService:
             completion_rate=(len(completed) / started_count) if started_count else None,
             avg_completion_pct=statistics.fmean(completion_pcts) if completion_pcts else None,
             avg_duration_seconds=statistics.fmean(durations) if durations else None,
+            median_duration_seconds=statistics.median(durations) if durations else None,
+            invited_count=invited_count,
+            not_responded_count=not_responded_count,
+            response_rate=response_rate,
+            valid_rate=valid_rate,
             series=series,
             variables=variables,
         )

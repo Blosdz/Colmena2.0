@@ -7,7 +7,14 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
 import { getProject } from '../../../api/projects.js';
 import { listVariables } from '../../../api/variables.js';
-import { getDataDictionary, getLongDataset, getResultsOverview, getWideDataset, listStudies } from '../../../api/studies.js';
+import {
+  getDataDictionary,
+  getLongDataset,
+  getResponseDescriptives,
+  getResultsOverview,
+  getWideDataset,
+  listStudies,
+} from '../../../api/studies.js';
 import { getAnalyticsMethods, runAnalysis } from '../../../api/analytics.js';
 
 import { PageHeader } from '../../../components/layout/PageHeader.jsx';
@@ -17,6 +24,9 @@ import { EmptyState } from '../../../components/ui/EmptyState.jsx';
 import { LoadingState } from '../../../components/ui/LoadingState.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import StudySelector from '../../../components/colmena/StudySelector.jsx';
+import CensopasDimensionsPanel from '../../../components/colmena/results/CensopasDimensionsPanel.jsx';
+import DimensionDashboardTab from '../../../components/colmena/results/DimensionDashboardTab.jsx';
+import ResponseMatrixTab from '../../../components/colmena/results/ResponseMatrixTab.jsx';
 import BaremResultsPanel from '../../../components/colmena/results/BaremResultsPanel.jsx';
 import EvolutionPanel from '../../../components/colmena/results/EvolutionPanel.jsx';
 import UnitResultsPanel from '../../../components/colmena/results/UnitResultsPanel.jsx';
@@ -25,6 +35,8 @@ import { SegmentationPanel, SpearmanPanel } from '../../../components/colmena/re
 
 const TABS = [
   { key: 'comparison', label: 'Comparar variables' },
+  { key: 'dimensions', label: 'Dimensiones' },
+  { key: 'subdimensions', label: 'Subdimensiones' },
   { key: 'evolution', label: 'Evolución' },
   { key: 'baremos', label: 'Baremos' },
   { key: 'units', label: 'Unidades' },
@@ -301,7 +313,7 @@ export default function ProjectResultsPage() {
     queryFn: () => getLongDataset(studyId),
     enabled: Boolean(studyId) && tab === 'long',
   });
-  const { data: wideDataset } = useQuery({
+  const { data: wideDataset, isLoading: isLoadingWideDataset } = useQuery({
     queryKey: ['wideDataset', studyId],
     queryFn: () => getWideDataset(studyId),
     enabled: Boolean(studyId) && tab === 'wide',
@@ -310,6 +322,11 @@ export default function ProjectResultsPage() {
     queryKey: ['resultsOverview', studyId],
     queryFn: () => getResultsOverview(studyId),
     enabled: Boolean(studyId) && tab === 'segmentation',
+  });
+  const { data: descriptives, isLoading: isLoadingDescriptives } = useQuery({
+    queryKey: ['responseDescriptives', studyId],
+    queryFn: () => getResponseDescriptives(studyId),
+    enabled: Boolean(studyId) && tab === 'wide',
   });
 
   if (isLoadingProject) return <LoadingState label="Cargando..." />;
@@ -352,8 +369,25 @@ export default function ProjectResultsPage() {
               rows={longDataset?.rows || []}
             />
           ) : null}
-          {studyId && tab === 'wide' ? <GenericTable columns={wideDataset?.columns || []} rows={wideDataset?.rows || []} /> : null}
+          {studyId && tab === 'wide' ? (
+            <ResponseMatrixTab
+              dataset={wideDataset}
+              descriptives={descriptives}
+              isLoading={isLoadingWideDataset || isLoadingDescriptives}
+              projectId={Number(projectId)}
+            />
+          ) : null}
           {studyId && tab === 'analytics' ? <AnalyticsTab projectId={projectId} studyId={studyId} /> : null}
+          {studyId && tab === 'dimensions' ? <DimensionDashboardTab projectId={Number(projectId)} studyId={studyId} /> : null}
+          {studyId && tab === 'subdimensions' ? (
+            <CensopasDimensionsPanel
+              studyId={studyId}
+              constructType="SUBDIMENSION"
+              title="Subdimensiones"
+              emptyTitle="Sin subdimensiones"
+              emptyDescription="Esta aplicación usa la versión corta (D1-D6) o el instrumento no tiene subdimensiones configuradas."
+            />
+          ) : null}
           {studyId && tab === 'baremos' ? <BaremResultsPanel studyId={studyId} /> : null}
           {studyId && tab === 'units' ? <UnitResultsPanel studyId={studyId} /> : null}
           {studyId && tab === 'normality' ? <NormalityPanel studyId={studyId} /> : null}

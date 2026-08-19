@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, PlusCircle, ShieldAlert, ShieldCheck, Users } from 'lucide-react';
+import { PlusCircle, ShieldAlert, ShieldCheck, Users } from 'lucide-react';
 
 import {
   createStudyUnit,
@@ -10,7 +11,6 @@ import {
   getStudy,
   listStudyUnitTypes,
   listStudyUnits,
-  runCensopasScoring,
 } from '../../../api/studies.js';
 import { getCensopasReadiness } from '../../../api/instruments.js';
 import { formatNumber } from '../../../utils/format.js';
@@ -141,6 +141,7 @@ export default function UnitResultsPanel({ studyId }) {
           unitTypeId={Number(unitTypeId)}
           minPublishableN={study.min_publishable_n}
           instrumentVersionId={study.instrument_version_id}
+          projectId={study.project_id}
         />
       )}
     </div>
@@ -264,8 +265,7 @@ function UnitsConfigPanel({ unitTypeId }) {
   );
 }
 
-function UnitResultsTable({ studyId, unitTypeId, minPublishableN, instrumentVersionId }) {
-  const queryClient = useQueryClient();
+function UnitResultsTable({ studyId, unitTypeId, minPublishableN, instrumentVersionId, projectId }) {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['censopasUnitResults', studyId, unitTypeId],
     queryFn: () => getCensopasUnitResults(studyId, unitTypeId),
@@ -278,15 +278,6 @@ function UnitResultsTable({ studyId, unitTypeId, minPublishableN, instrumentVers
     queryFn: () => getCensopasReadiness(instrumentVersionId),
     enabled: Boolean(instrumentVersionId),
     retry: false,
-  });
-  const readyForScoring = Boolean(readiness?.ready_for_scoring);
-
-  const scoringMutation = useMutation({
-    mutationFn: () => runCensopasScoring(studyId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['censopasUnitResults', studyId, unitTypeId] });
-      queryClient.invalidateQueries({ queryKey: ['censopasResults', studyId] });
-    },
   });
 
   const { data: globalResults } = useQuery({
@@ -329,22 +320,18 @@ function UnitResultsTable({ studyId, unitTypeId, minPublishableN, instrumentVers
           <ShieldCheck size={15} />
           Umbral n ≥ {data?.min_publishable_n ?? minPublishableN}
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => scoringMutation.mutate()}
-          loading={scoringMutation.isPending}
-          disabled={Boolean(instrumentVersionId) && !readyForScoring}
-          title={instrumentVersionId && !readyForScoring ? 'Resuelve el checklist de preparación CENSOPAS de arriba antes de calcular.' : undefined}
-        >
-          <Calculator size={15} className="mr-1" /> Calcular resultados CENSOPAS
-        </Button>
+        {/* "Calcular resultados" es una única acción para todo el estudio —
+            vive en la pestaña Baremos, no un botón propio aquí, para que
+            nunca existan dos corridas independientes del mismo estudio. */}
+        {projectId ? (
+          <Link
+            to={`/colmena/project/${projectId}/results`}
+            className="colmena-badge inline-flex bg-amber/10 text-yellowDark"
+          >
+            Calcular / actualizar resultados en Baremos
+          </Link>
+        ) : null}
       </div>
-      {scoringMutation.isError ? (
-        <p className="mt-3 text-sm font-medium text-danger">
-          {scoringMutation.error?.message || 'No se pudo calcular el scoring CENSOPAS.'}
-        </p>
-      ) : null}
 
       {isLoading ? (
         <div className="mt-4"><LoadingState label="Cargando resultados por unidad…" /></div>

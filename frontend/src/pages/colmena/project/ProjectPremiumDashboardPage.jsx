@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Activity, AlertTriangle, Clock, Layers, Sparkles, Target, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Clock, Gauge, Layers, ScatterChart as ScatterChartIcon, Sparkles, Target, Users } from 'lucide-react';
 
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
 import { getProject } from '../../../api/projects.js';
 import { getProjectTelemetry } from '../../../api/telemetry.js';
-import { getResultsOverview } from '../../../api/studies.js';
+import { getResponseDescriptives, getResultsOverview } from '../../../api/studies.js';
 import { listVariables } from '../../../api/variables.js';
 import { runAnalysis, runSpearmanMatrix } from '../../../api/analytics.js';
 
@@ -21,6 +21,7 @@ import { Table, TableContainer, Td, THead, Th, Tr } from '../../../components/ui
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
 import StudySelector from '../../../components/colmena/StudySelector.jsx';
 import { SpearmanMatrix } from '../../../components/colmena/results/SpearmanPanel.jsx';
+import GroupComparisonsPanel from '../../../components/colmena/results/GroupComparisonsPanel.jsx';
 import { formatNumber, formatPercent } from '../../../utils/format.js';
 import { semanticBand, semanticBandColor, semanticBandOrder } from '../../../utils/chartColors.js';
 import { dominantBand, unfavorablePct } from '../../../utils/scoringResults.js';
@@ -33,6 +34,35 @@ function formatDuration(seconds) {
   const rounded = Math.round(seconds);
   if (rounded < 60) return `${rounded}s`;
   return `${Math.floor(rounded / 60)}m ${rounded % 60}s`;
+}
+
+function SectionHeading({ eyebrow, title, description }) {
+  return (
+    <div className="mt-2 border-b border-border pb-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-amber">{eyebrow}</p>
+      <p className="text-base font-semibold text-dark">{title}</p>
+      {description ? <p className="mt-1 text-xs text-muted">{description}</p> : null}
+    </div>
+  );
+}
+
+function MultivariateSection() {
+  return (
+    <Card>
+      <div className="flex items-start gap-3">
+        <ScatterChartIcon size={18} className="mt-0.5 shrink-0 text-muted" />
+        <div>
+          <p className="text-sm font-semibold text-dark">Modelo multivariable (regresión)</p>
+          <p className="mt-1 text-xs text-muted">
+            El backend todavía no expone un endpoint premium para regresión (predictor, OR, p). Pendiente como
+            GAP-PREMIUM-REGRESSION — no se muestran valores simulados. Cuando exista, se etiquetará siempre
+            &ldquo;Analítica complementaria — modelo ajustado&rdquo; y nunca como resultado CENSOPAS; tampoco se
+            dibujará un forest plot mientras el backend no calcule intervalos de confianza.
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
 }
 
 function DimensionDistributionRow({ result }) {
@@ -147,6 +177,95 @@ function SpearmanCard({ studyId }) {
           Calcula la matriz para ver qué dimensiones correlacionan entre sí.
         </div>
       )}
+    </Card>
+  );
+}
+
+function ReliabilityCard({ studyId, dimensions }) {
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const settled = await Promise.allSettled(
+        dimensions.map((dimension) =>
+          runAnalysis('reliability', studyId, { construct_id: dimension.construct_id }).then((run) => ({
+            dimension,
+            run,
+          })),
+        ),
+      );
+      return settled.map((outcome, index) =>
+        outcome.status === 'fulfilled' ? outcome.value : { dimension: dimensions[index], error: outcome.reason },
+      );
+    },
+    meta: { skipGlobalToast: true },
+  });
+
+  const rows = mutation.data || [];
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-dark">Consistencia interna</p>
+          <p className="mt-1 text-xs text-muted">
+            Alfa de Cronbach y Omega de McDonald por dimensión. Evalúan consistencia interna del instrumento; no
+            representan diagnóstico ni validez individual.
+          </p>
+        </div>
+        <Button
+          disabled={!dimensions.length}
+          loading={mutation.isPending}
+          onClick={() => mutation.mutate()}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          <Gauge size={14} /> Calcular confiabilidad
+        </Button>
+      </div>
+      {mutation.isError ? <p className="mt-3 text-xs font-medium text-danger">{mutation.error?.message}</p> : null}
+      {rows.length ? (
+        <TableContainer className="mt-4">
+          <Table>
+            <THead>
+              <Tr>
+                <Th>Dimensión</Th>
+                <Th align="right">Ítems</Th>
+                <Th align="right">Alfa</Th>
+                <Th align="right">Omega</Th>
+                <Th align="right">n</Th>
+              </Tr>
+            </THead>
+            <tbody>
+              {rows.map(({ dimension, run, error }) => {
+                const alpha = run?.results.find((item) => item.result_type === 'CRONBACH_ALPHA');
+                const omega = run?.results.find((item) => item.result_type === 'MCDONALD_OMEGA');
+                return (
+                  <Tr key={dimension.construct_id}>
+                    <Td className="font-medium text-dark">{dimension.construct_name}</Td>
+                    <Td align="right">{alpha?.result_data?.n_items ?? '—'}</Td>
+                    <Td align="right" className="font-mono">
+                      {error ? '—' : formatNumber(alpha?.numeric_value, { decimals: 2 })}
+                    </Td>
+                    <Td align="right" className="font-mono">
+                      {error ? '—' : formatNumber(omega?.numeric_value, { decimals: 2 })}
+                    </Td>
+                    <Td align="right">{error ? '—' : alpha?.n_valid ?? '—'}</Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </TableContainer>
+      ) : (
+        <div className="mt-4 rounded-xl border border-dashed border-border p-5 text-sm text-muted">
+          Calcula la confiabilidad para ver alfa y omega por dimensión.
+        </div>
+      )}
+      {rows.some((row) => row.error) ? (
+        <p className="mt-2 text-[11px] text-muted">
+          Algunas dimensiones no alcanzan el mínimo de ítems o respondientes para calcular confiabilidad.
+        </p>
+      ) : null}
     </Card>
   );
 }
@@ -289,6 +408,11 @@ export default function ProjectPremiumDashboardPage() {
     queryFn: () => listVariables(projectId, { page: 1, pageSize: 200 }),
     enabled: Boolean(projectId),
   });
+  const { data: descriptives } = useQuery({
+    queryKey: ['responseDescriptives', studyId],
+    queryFn: () => getResponseDescriptives(studyId),
+    enabled: Boolean(studyId),
+  });
 
   if (isLoadingProject) return <LoadingState label="Cargando..." />;
   if (!project) return <ProjectMissingState />;
@@ -320,9 +444,9 @@ export default function ProjectPremiumDashboardPage() {
   return (
     <div className="colmena-page">
       <PageHeader
-        eyebrow="Tablero premium"
+        eyebrow="Explorador"
         title={project.name}
-        description="Resumen de decisión: participación, distribución oficial por dimensión, prioridades y análisis exploratorios en una sola vista."
+        description="Resumen, confiabilidad, comparaciones, correlaciones, segmentación y multivariado, organizados en secciones separadas."
       />
 
       <Card>
@@ -337,6 +461,7 @@ export default function ProjectPremiumDashboardPage() {
         <LoadingState label="Cargando tablero…" />
       ) : (
         <>
+          <SectionHeading eyebrow="Explorador" title="Resumen" description="Participación, distribución CENSOPAS por dimensión y priorización preventiva." />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <MetricCard icon={Users} label="Respuestas válidas" value={selectedTelemetry?.valid_count ?? '—'} />
             <MetricCard icon={Activity} label="Tasa de válidas" value={coveragePct === null ? '—' : `${coveragePct}%`} />
@@ -383,8 +508,17 @@ export default function ProjectPremiumDashboardPage() {
             </Card>
 
             <Card>
-              <p className="text-sm font-semibold text-dark">Distribución oficial por dimensión</p>
+              <p className="text-sm font-semibold text-dark">Distribución por dimensión</p>
               <p className="mb-1 mt-1 text-xs text-muted">Capa metodológica · favorable / intermedio / desfavorable.</p>
+              <p className="mb-1 text-xs text-muted">
+                Estado metodológico:{' '}
+                <strong className="text-dark">
+                  {overview?.official_equivalence ? 'Baremo oficial' : 'Baremo de referencia'}
+                </strong>
+                {overview?.official_equivalence
+                  ? ' · equivale al resultado oficial CENSOPAS.'
+                  : ' · no equivalente al resultado oficial CENSOPAS.'}
+              </p>
               {dimensions.length ? (
                 <div className="mt-2 divide-y divide-border/70">
                   {dimensions.map((result) => <DimensionDistributionRow key={result.construct_id} result={result} />)}
@@ -396,9 +530,10 @@ export default function ProjectPremiumDashboardPage() {
           </div>
 
           <Card>
-            <p className="text-sm font-semibold text-dark">Priorización por dimensión</p>
+            <p className="text-sm font-semibold text-dark">Priorización preventiva por dimensión</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber">Analítica complementaria Colmena</p>
             <p className="mb-3 mt-1 text-xs text-muted">
-              Ordenado por prioridad calculada por el backend (o por % desfavorable si aún no hay baremo). No reemplaza el juicio técnico del equipo responsable.
+              Orden de exploración preventiva calculado por el backend a partir del % desfavorable (o por % desfavorable si aún no hay baremo). No es una clasificación oficial adicional de CENSOPAS ni reemplaza el juicio técnico del equipo responsable.
             </p>
             {priorityRows.length ? (
               <>
@@ -414,7 +549,8 @@ export default function ProjectPremiumDashboardPage() {
 
           {subdimensionRows.length ? (
             <Card>
-              <p className="text-sm font-semibold text-dark">Priorización por subdimensión</p>
+              <p className="text-sm font-semibold text-dark">Priorización preventiva por subdimensión</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber">Analítica complementaria Colmena</p>
               <p className="mb-3 mt-1 text-xs text-muted">
                 Vista compacta de todas las subdimensiones a la vez, en vez de un gráfico por cada una.
               </p>
@@ -422,10 +558,36 @@ export default function ProjectPremiumDashboardPage() {
             </Card>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <SpearmanCard studyId={studyId} />
-            <SegmentationCard studyId={studyId} rankableVariables={rankableVariables} />
-          </div>
+          <SectionHeading
+            eyebrow="Dashboard avanzado"
+            title="Confiabilidad"
+            description="Consistencia interna por dimensión (alfa de Cronbach, omega de McDonald). No es diagnóstico ni validez individual."
+          />
+          <ReliabilityCard studyId={studyId} dimensions={dimensions} />
+
+          <SectionHeading
+            eyebrow="Dashboard avanzado"
+            title="Comparaciones"
+            description="El backend elige la prueba (Chi², Mann-Whitney o Kruskal-Wallis) según el número de grupos; el frontend nunca la decide."
+          />
+          <GroupComparisonsPanel descriptives={descriptives} overview={overview} studyId={studyId} />
+
+          <SectionHeading
+            eyebrow="Dashboard avanzado"
+            title="Correlaciones"
+            description="Matriz de Spearman entre dimensiones (rho, p, q de Benjamini-Hochberg, n y magnitud). Exploratorio, no causal."
+          />
+          <SpearmanCard studyId={studyId} />
+
+          <SectionHeading
+            eyebrow="Dashboard avanzado"
+            title="Segmentación"
+            description="Agrupamiento exploratorio (k-means) sobre variables ordinales o de escala. No clasifica ni diagnostica personas."
+          />
+          <SegmentationCard studyId={studyId} rankableVariables={rankableVariables} />
+
+          <SectionHeading eyebrow="Dashboard avanzado" title="Multivariado" description="Modelo multivariable (regresión) — fase avanzada." />
+          <MultivariateSection />
         </>
       )}
     </div>

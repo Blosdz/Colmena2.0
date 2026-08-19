@@ -14,6 +14,7 @@ from app.models.study import Study, StudySnapshot, StudyUnit, StudyUnitType
 from app.models.censopas import Barem
 from app.models.construct import Construct
 from app.models.option_set import OptionSet
+from app.models.project import Project
 from app.models.question import Question
 from app.models.scoring import ScoringRule
 from app.models.survey import Survey, SurveyQuestion
@@ -51,12 +52,29 @@ class StudyService:
         if survey is None or survey.project_id != project_id:
             raise NotFoundError(f"Survey {payload.survey_id} no encontrado en este proyecto")
 
+        project = await self.session.get(Project, project_id)
+        if project is None:
+            raise NotFoundError(f"Proyecto {project_id} no encontrado")
+        study_type = payload.study_type
+        barem_id = None
+        if project.project_type == "CENSO":
+            study_type = "CENSO"
+            configured_barem_id = (project.metadata_ or {}).get("barem_id")
+            if configured_barem_id is not None:
+                barem = await self.session.get(Barem, int(configured_barem_id))
+                if barem is None or barem.instrument_version_id != survey.instrument_version_id:
+                    raise ValidationDomainError(
+                        "El baremo automático CensoPÁS no corresponde al formulario del proyecto."
+                    )
+                barem_id = barem.id
+
         study = Study(
             project_id=project_id,
             survey_id=payload.survey_id,
             instrument_version_id=survey.instrument_version_id,
             name=payload.name,
-            study_type=payload.study_type,
+            study_type=study_type,
+            barem_id=barem_id,
             start_at=payload.start_at,
             end_at=payload.end_at,
             min_publishable_n=payload.min_publishable_n,

@@ -1,6 +1,6 @@
 import { Card } from './Card.jsx';
 
-export default function MetricCard({ icon: Icon, label, value }) {
+export default function MetricCard({ icon: Icon, label, value, hint }) {
   return (
     <Card className="flex min-h-20 items-center gap-3 px-4 py-3" padded={false}>
       {Icon ? (
@@ -11,6 +11,7 @@ export default function MetricCard({ icon: Icon, label, value }) {
       <div className="min-w-0">
         <p className="colmena-label">{label}</p>
         <p className="truncate text-xl font-bold text-dark">{value}</p>
+        {hint ? <p className="truncate text-[11px] text-muted">{hint}</p> : null}
       </div>
     </Card>
   );

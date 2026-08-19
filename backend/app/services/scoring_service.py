@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import NotFoundError, ValidationDomainError
+from app.core.exceptions import InsufficientSampleError, NotFoundError, ValidationDomainError
 from app.models.analysis import AnalysisRun
 from app.models.censopas import Barem, BaremBand, ConstructResult, ConstructScore, ResponseScore
 from app.models.construct import Construct, ConstructItem
@@ -26,8 +26,14 @@ from app.models.scoring import ScoringRule
 from app.models.study import Study
 from app.models.variable import Variable
 from app.repositories.censopas import CensopasRepository
+from app.repositories.instruments import InstrumentRepository
 from app.repositories.responses import valid_session_ids
 from app.repositories.studies import StudyRepository
+from app.analytics.censopas.classification import summarize_trichotomy
+from app.services.censopas_methodology import (
+    resolve_censopas_methodological_status,
+    resolve_official_equivalence_enabled,
+)
 from app.schemas.scoring import (
     ConstructBaremResult,
     ResultBandCount,
@@ -44,6 +50,7 @@ class ScoringService:
         self.session = session
         self.study_repo = StudyRepository(session)
         self.censopas_repo = CensopasRepository(session)
+        self.instrument_repo = InstrumentRepository(session)
 
     async def _get_study(self, study_id: int) -> Study:
         stmt = (
@@ -157,7 +164,12 @@ class ScoringService:
         return raw_value, normalized
 
     @staticmethod
-    def _links_with_descendants(constructs: list[Construct]) -> dict[int, list[ConstructItem]]:
+    def resolve_effective_item_links(constructs: list[Construct]) -> dict[int, list[ConstructItem]]:
+        """Ítems puntuables efectivos por constructo, incluyendo los heredados de
+        descendientes (p. ej. una DIMENSION sin `item_links` directos pero con
+        SUBDIMENSION hijas que sí los tienen). Reutilizado por
+        `CensopasScoringService`/provisioning — no debe duplicarse (harness §21).
+        """
         children: dict[int, list[int]] = {}
         direct: dict[int, list[ConstructItem]] = {}
         for construct in constructs:
@@ -274,16 +286,32 @@ class ScoringService:
 
         await self.session.flush()
 
-    async def run(self, study_id: int) -> tuple[AnalysisRun, ScoreRunSummary]:
+    async def run(
+        self, study_id: int, *, require_explicit_scoring_rules: bool = False
+    ) -> tuple[AnalysisRun, ScoreRunSummary]:
+        """Ejecuta la puntuación canónica del estudio.
+
+        `require_explicit_scoring_rules`: cuando es True, cualquier ítem sin
+        una `ScoringRule` validada falla el scoring en vez de recurrir al
+        `numeric_value` del option_set — política obligatoria para CENSOPAS
+        (el risk_map validado no es intercambiable con una normalización
+        genérica), pero no para instrumentos Likert genéricos que nunca
+        necesitaron reglas explícitas.
+        """
         study = await self._get_study(study_id)
-        constructs = await self._load_constructs(study.instrument_version_id)
-        links_by_construct = self._links_with_descendants(constructs)
+        instrument_version_id = study.instrument_version_id
+        constructs = await self._load_constructs(instrument_version_id)
+        links_by_construct = self.resolve_effective_item_links(constructs)
         scored_constructs = [item for item in constructs if links_by_construct[item.id]]
         if not scored_constructs:
             raise ValidationDomainError(
                 "El instrumento no tiene ítems Likert puntuables vinculados a constructos."
             )
         sessions, responses = await self._load_responses(study_id)
+        if not sessions:
+            raise InsufficientSampleError(
+                "No hay sesiones COMPLETED con validation_status=VALID para calcular el scoring."
+            )
         rules = await self._load_rules(study.instrument_version_id)
         barem = await self.censopas_repo.get_barem(study.barem_id) if study.barem_id else None
         bands_by_construct: dict[int, list[BaremBand]] = {}
@@ -314,6 +342,29 @@ class ScoringService:
             construct.id: [] for construct in scored_constructs
         }
         try:
+            if require_explicit_scoring_rules:
+                missing_rules: list[dict] = []
+                seen_question_ids: set[int] = set()
+                for construct in scored_constructs:
+                    for link in links_by_construct[construct.id]:
+                        if link.question_id in seen_question_ids or link.question_id in rules:
+                            continue
+                        seen_question_ids.add(link.question_id)
+                        missing_rules.append(
+                            {
+                                "construct_id": construct.id,
+                                "construct_code": construct.code,
+                                "question_id": link.question_id,
+                                "question_code": link.question.code if link.question else None,
+                            }
+                        )
+                if missing_rules:
+                    raise ValidationDomainError(
+                        "Faltan scoring_rules para uno o más ítems puntuables; cárguelas antes "
+                        "de ejecutar el scoring.",
+                        missing_scoring_rules=missing_rules,
+                    )
+
             for response_session in sessions:
                 for construct in scored_constructs:
                     links = links_by_construct[construct.id]
@@ -394,34 +445,27 @@ class ScoringService:
 
             for construct in scored_constructs:
                 values = aggregate_values[construct.id]
-                category_counts = Counter(category for _, category in values)
-                n_valid = len(values)
-                favorable = category_counts.get("FAVORABLE", 0)
-                intermediate = category_counts.get("INTERMEDIATE", 0)
-                unfavorable = category_counts.get("UNFAVORABLE", 0)
-                collective = None
-                if n_valid and category_counts:
-                    collective = category_counts.most_common(1)[0][0]
+                summary = summarize_trichotomy(values)
                 self.session.add(
                     ConstructResult(
                         study_id=study_id,
                         analysis_run_id=run.id,
                         construct_id=construct.id,
-                        n_valid=n_valid,
-                        favorable_n=favorable,
-                        intermediate_n=intermediate,
-                        unfavorable_n=unfavorable,
-                        favorable_pct=round((favorable / n_valid) * 100, 4) if n_valid else None,
-                        intermediate_pct=round((intermediate / n_valid) * 100, 4) if n_valid else None,
-                        unfavorable_pct=round((unfavorable / n_valid) * 100, 4) if n_valid else None,
-                        construct_score=(
-                            statistics.fmean(score for score, _ in values) if values else None
-                        ),
-                        classification=collective,
+                        n_valid=summary["n_valid"],
+                        favorable_n=summary["favorable_n"],
+                        intermediate_n=summary["intermediate_n"],
+                        unfavorable_n=summary["unfavorable_n"],
+                        favorable_pct=summary["favorable_pct"],
+                        intermediate_pct=summary["intermediate_pct"],
+                        unfavorable_pct=summary["unfavorable_pct"],
+                        construct_score=summary["construct_score"],
+                        classification=summary["classification"],
                         classification_status="BAREMED" if barem else "UNCLASSIFIED",
                         barem_id=barem.id if barem else None,
                         algorithm_version=ALGORITHM_VERSION,
-                        metadata_={"band_counts": dict(category_counts)},
+                        metadata_={
+                            "band_counts": dict(Counter(category for _, category in values))
+                        },
                     )
                 )
 
@@ -447,7 +491,7 @@ class ScoringService:
                 analysis_type="LIKERT_SCORING",
                 engine="PYTHON",
                 algorithm_version=ALGORITHM_VERSION,
-                parameters={"instrument_version_id": study.instrument_version_id},
+                parameters={"instrument_version_id": instrument_version_id},
                 status="FAILED",
                 started_at=run.started_at,
                 completed_at=datetime.now(UTC),
@@ -490,6 +534,14 @@ class ScoringService:
         barem = (
             await self.censopas_repo.get_barem(result_barem_id) if result_barem_id else None
         )
+        official_equivalence_enabled = await resolve_official_equivalence_enabled(
+            self.instrument_repo, study.instrument_version_id
+        )
+        methodological_status = resolve_censopas_methodological_status(
+            barem, official_equivalence_enabled
+        )
+        barem_status = methodological_status["barem_status"]
+        official_equivalence = methodological_status["official_equivalence"]
         if latest_run is None:
             return StudyResultsOverview(
                 study_id=study.id,
@@ -503,6 +555,8 @@ class ScoringService:
                 instrument_version_id=study.instrument_version_id,
                 barem_id=result_barem_id,
                 barem_name=barem.name if barem else None,
+                barem_status=barem_status,
+                official_equivalence=official_equivalence,
                 n_completed=n_completed,
                 min_publishable_n=study.min_publishable_n,
                 results=[],
@@ -551,6 +605,7 @@ class ScoringService:
                         band_id=band.id,
                         code=band.code,
                         label=band.label,
+                        classification_code=band.classification_code,
                         color_hint=band.color_hint,
                         n=None if suppressed else count,
                         pct=None if suppressed else round(pct, 4),
@@ -596,6 +651,8 @@ class ScoringService:
             instrument_version_id=study.instrument_version_id,
             barem_id=result_barem_id,
             barem_name=barem.name if barem else None,
+            barem_status=barem_status,
+            official_equivalence=official_equivalence,
             n_completed=n_completed,
             min_publishable_n=study.min_publishable_n,
             results=results,

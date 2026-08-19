@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.bsc import ActionPlan, ActionPlanItem, Kpi, KpiMeasurement
 
@@ -40,11 +41,17 @@ class BscRepository:
         return kpi
 
     async def list_kpis(self, study_id: int) -> list[Kpi]:
-        stmt = select(Kpi).where(Kpi.study_id == study_id)
+        stmt = (
+            select(Kpi)
+            .where(Kpi.study_id == study_id)
+            .options(selectinload(Kpi.measurements))
+            .order_by(Kpi.id)
+        )
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_kpi(self, kpi_id: int) -> Kpi | None:
-        return await self.session.get(Kpi, kpi_id)
+        stmt = select(Kpi).where(Kpi.id == kpi_id).options(selectinload(Kpi.measurements))
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def add_measurement(self, measurement: KpiMeasurement) -> KpiMeasurement:
         self.session.add(measurement)

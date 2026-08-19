@@ -10,31 +10,28 @@ from __future__ import annotations
 import hashlib
 import json
 import statistics
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.analytics.censopas.classification import classify_collective_result, classify_construct_score
-from app.analytics.censopas.scoring import derive_item_values
+from app.analytics.censopas.classification import cutoff_to_bands, summarize_trichotomy
 from app.core.exceptions import (
     ConflictError,
-    InsufficientSampleError,
     NotFoundError,
     ValidationDomainError,
 )
 from app.models.analysis import AnalysisRun
-from app.models.censopas import Barem, BaremBand, BaremCutoff, ConstructResult, ConstructScore, ResponseScore
+from app.models.censopas import Barem, BaremBand, BaremCutoff, ConstructResult, ConstructScore
 from app.models.construct import Construct, ConstructItem
+from app.models.instrument import Instrument, InstrumentVersion
 from app.models.option_set import OptionSet, OptionSetOption
 from app.models.question import Question
-from app.models.response import Response, ResponseSession, ResponseSessionUnit
+from app.models.response import ResponseSession, ResponseSessionUnit
 from app.models.study import StudyUnit, StudyUnitType
 from app.models.scoring import ScoringRule
 from app.repositories.censopas import CensopasRepository
 from app.repositories.instruments import InstrumentRepository
-from app.repositories.responses import valid_session_ids
 from app.repositories.studies import StudyRepository
 from app.schemas.censopas import (
     BaremBandGenerate,
@@ -49,6 +46,10 @@ from app.schemas.censopas import (
     CensopasBaremManifest,
     CensopasBaremManifestValidation,
     ScoringRuleCreate,
+)
+from app.services.censopas_methodology import (
+    resolve_censopas_methodological_status,
+    resolve_official_equivalence_enabled,
 )
 from app.services.instrument_edit_policy import InstrumentEditPolicy
 from app.services.privacy_service import PrivacyService
@@ -586,199 +587,70 @@ class CensopasScoringService:
             "actual": actual,
             "errors": errors,
             "warnings": warnings,
+            # Señal reutilizada por el orquestador de scoring: más laxa que
+            # `version_kind != "UNKNOWN"` (que exige que el conteo de ítems
+            # calce exactamente), para que un instrumento CENSOPAS todavía en
+            # armado también reciba la política estricta (risk_map explícito
+            # obligatorio, sin fallback a numeric_value de option_set).
+            "is_censopas_instrument": "CENSOPAS" in instrument_token,
         }
 
-    async def run_scoring(self, study_id: int) -> AnalysisRun:
-        study = await self.study_repo.get(study_id)
-        if study is None:
-            raise NotFoundError(f"Estudio {study_id} no encontrado")
-        if study.instrument_version_id is None:
-            raise ValidationDomainError(
-                "El estudio no tiene una versión de instrumento asociada; no se puede aplicar scoring."
-            )
+    _PLAN_LABELS: dict[str, tuple[str, str]] = {
+        "SHORT": (
+            "Plan corto — CENSOPAS-COPSOQ",
+            "31 ítems psicosociales, 6 dimensiones, sin subdimensiones. "
+            "Para centros con menos de 25 trabajadores o participación efectiva menor a 25.",
+        ),
+        "MEDIUM": (
+            "Plan medio — CENSOPAS-COPSOQ",
+            "69 ítems psicosociales, 6 dimensiones y 20 subdimensiones, incluye salud, "
+            "bienestar y satisfacción. Para centros con 25 o más trabajadores.",
+        ),
+    }
 
-        version = await self.instrument_repo.get_version_with_instrument(study.instrument_version_id)
-        if version is None:
-            raise NotFoundError(f"Versión de instrumento {study.instrument_version_id} no encontrada")
-
-        readiness = await self.get_readiness(version.id)
-        if (
-            readiness["version_kind"] != "UNKNOWN"
-            and not readiness["ready_for_scoring"]
-        ):
-            raise ValidationDomainError(
-                "La versión CENSOPAS no está lista para ejecutar scoring.",
-                readiness=readiness,
-            )
-
-        run = AnalysisRun(
-            study_id=study_id,
-            analysis_type="CENSOPAS_SCORING",
-            status="PENDING",
-            parameters={"instrument_version_id": version.id},
-        )
-        self.session.add(run)
-        await self.session.flush()
-        run.status = "RUNNING"
-        run.started_at = datetime.now(UTC)
-        await self.session.flush()
-
-        try:
-            constructs = await self._load_constructs(version.id)
-            scored_constructs = [c for c in constructs if c.item_links]
-            if not scored_constructs:
-                raise ValidationDomainError(
-                    "La versión del instrumento no tiene constructos DIMENSION/SUBDIMENSION "
-                    "con ítems vinculados."
-                )
-
-            missing_rules = await self._diagnose_missing_scoring_rules(scored_constructs, version.id)
-            if missing_rules:
-                run.parameters = {**run.parameters, "missing_scoring_rules": missing_rules}
-                raise ValidationDomainError(
-                    "Faltan scoring_rules para uno o más ítems puntuables; cárguelas con "
-                    "POST /instrument-versions/{id}/scoring-rules antes de ejecutar el scoring.",
-                    missing_scoring_rules=missing_rules,
-                )
-
-            sessions = await self._load_valid_sessions(study_id)
-            if not sessions:
-                raise InsufficientSampleError(
-                    "No hay sesiones COMPLETED con validation_status=VALID para calcular "
-                    "el scoring CENSOPAS."
-                )
-
-            barem = await self.repo.get_barem(study.barem_id) if study.barem_id else None
-            session_units = await self._load_session_units(study_id)
-            cutoffs_by_construct = {c.construct_id: c for c in barem.cutoffs} if barem else {}
-
-            unmapped_by_construct: dict[str, list[str]] = {}
-            built_results: list[ConstructResult] = []
-            for construct in scored_constructs:
-                session_scores, unmapped = await self._score_construct_for_sessions(
-                    construct, sessions, version.id, run.id
-                )
-                if unmapped:
-                    unmapped_by_construct[construct.code] = sorted(unmapped)
-                cutoff = cutoffs_by_construct.get(construct.id)
-                for response_session_id, score, n_answered, n_total in session_scores:
-                    classification = None
-                    if cutoff is not None:
-                        classification = classify_construct_score(
-                            score,
-                            float(cutoff.cut_1),
-                            float(cutoff.cut_2),
-                            cutoff.direction,
-                            cutoff.favorable_label,
-                            cutoff.intermediate_label,
-                            cutoff.unfavorable_label,
-                        )
-                    await self.repo.add_construct_score(
-                        ConstructScore(
-                            study_id=study_id,
-                            analysis_run_id=run.id,
-                            response_session_id=response_session_id,
-                            construct_id=construct.id,
-                            barem_id=barem.id if barem else None,
-                            n_answered=n_answered,
-                            n_total=n_total,
-                            completion_pct=round((n_answered / n_total) * 100, 4) if n_total else 0,
-                            score_0_100=score,
-                            classification=classification,
-                            algorithm_version="censopas-v2",
-                            metadata_={"scoring_chain": "raw_code -> risk_value -> score_0_100"},
-                        )
-                    )
-                result = self._build_construct_result(
-                    study_id,
-                    run.id,
-                    construct,
-                    [score for _, score, _, _ in session_scores],
-                    cutoff,
-                    barem,
-                )
-                built_results.append(result)
-                await self.repo.add_construct_result(result)
-
-                unit_scores: dict[tuple[int, int], list[float]] = {}
-                for response_session_id, score, _n_answered, _n_total in session_scores:
-                    for unit_type_id, unit_id in session_units.get(
-                        response_session_id, []
-                    ):
-                        unit_scores.setdefault((unit_type_id, unit_id), []).append(score)
-                for (unit_type_id, unit_id), grouped_scores in unit_scores.items():
-                    unit_result = self._build_construct_result(
-                        study_id,
-                        run.id,
-                        construct,
-                        grouped_scores,
-                        cutoff,
-                        barem,
-                    )
-                    unit_result.unit_type_id = unit_type_id
-                    unit_result.unit_id = unit_id
-                    unit_result.metadata_ = {
-                        "aggregation": "STUDY_UNIT",
-                        "min_publishable_n": study.min_publishable_n,
-                    }
-                    await self.repo.add_construct_result(unit_result)
-
-            if all(result.n_valid == 0 for result in built_results):
-                run.parameters = {**run.parameters, "unmapped_codes": unmapped_by_construct}
-                raise ValidationDomainError(
-                    "El scoring CENSOPAS produjo cero casos válidos en todos los constructos; "
-                    "verifique que los raw_code registrados coincidan con las scoring_rules.",
-                    unmapped_codes=unmapped_by_construct,
-                )
-
-            run.status = "COMPLETED"
-            run.completed_at = datetime.now(UTC)
-            await self.session.flush()
-            await self.session.commit()
-        except Exception as exc:
-            run.status = "FAILED"
-            run.completed_at = datetime.now(UTC)
-            run.error_message = str(exc)
-            await self.session.flush()
-            await self.session.commit()
-            raise
-
-        return run
-
-    async def _load_constructs(self, instrument_version_id: int) -> list[Construct]:
+    async def list_official_plans(self) -> list[dict]:
+        """Catálogo de 'planes' (§ endpoint `GET /censopas/plans`): sólo versiones
+        oficiales (`is_system=True`) ya publicadas (`ACTIVE`/`LOCKED`) — nunca
+        `DRAFT`/`TEST`, así una versión en construcción no aparece como elegible."""
         stmt = (
-            select(Construct)
+            select(InstrumentVersion)
+            .join(Instrument, InstrumentVersion.instrument_id == Instrument.id)
             .where(
-                Construct.instrument_version_id == instrument_version_id,
-                Construct.construct_type.in_(("DIMENSION", "SUBDIMENSION")),
+                Instrument.is_system.is_(True),
+                Instrument.code == "CENSOPAS_COPSOQ",
+                InstrumentVersion.status.in_(("ACTIVE", "LOCKED")),
             )
-            .options(
-                selectinload(Construct.item_links).selectinload(ConstructItem.question)
-            )
+            .options(selectinload(InstrumentVersion.instrument))
+            .order_by(InstrumentVersion.id)
         )
-        return list((await self.session.execute(stmt)).scalars().all())
+        versions = (await self.session.execute(stmt)).scalars().all()
 
-    async def _diagnose_missing_scoring_rules(
-        self, constructs: list[Construct], instrument_version_id: int
-    ) -> list[dict]:
-        missing: list[dict] = []
-        for construct in constructs:
-            for link in construct.item_links:
-                if (link.item_role or "SCORED") != "SCORED":
-                    continue
-                rule = await self.repo.get_scoring_rule_for_question(
-                    instrument_version_id, link.question_id
-                )
-                if rule is None:
-                    missing.append(
-                        {
-                            "construct_id": construct.id,
-                            "construct_code": construct.code,
-                            "question_id": link.question_id,
-                            "question_code": link.question.code if link.question else None,
-                        }
-                    )
-        return missing
+        plans: list[dict] = []
+        for version in versions:
+            readiness = await self.get_readiness(version.id)
+            kind = readiness["version_kind"]
+            labels = self._PLAN_LABELS.get(kind)
+            if labels is None:
+                continue
+            plan_label, plan_description = labels
+            expected = readiness["expected"]
+            plans.append(
+                {
+                    "instrument_id": version.instrument_id,
+                    "instrument_version_id": version.id,
+                    "version_kind": kind,
+                    "version_code": version.version_code,
+                    "status": version.status,
+                    "plan_label": plan_label,
+                    "plan_description": plan_description,
+                    "question_count": expected.get("questions", 0),
+                    "scored_item_count": expected.get("scored", 0),
+                    "dimension_count": expected.get("dimensions", 0),
+                    "subdimension_count": expected.get("subdimensions", 0),
+                    "ready_for_scoring": readiness["ready_for_scoring"],
+                }
+            )
+        return plans
 
     async def _load_session_units(
         self, study_id: int
@@ -854,134 +726,68 @@ class CensopasScoringService:
             mapping[response_session_id] = expanded
         return mapping
 
-    async def _load_valid_sessions(self, study_id: int) -> list[ResponseSession]:
-        stmt = select(ResponseSession).where(ResponseSession.id.in_(valid_session_ids(study_id)))
-        return list((await self.session.execute(stmt)).scalars().all())
-
-    async def _score_construct_for_sessions(
-        self,
-        construct: Construct,
-        sessions: list[ResponseSession],
-        instrument_version_id: int,
-        analysis_run_id: int,
-    ) -> tuple[list[tuple[int, float, int, int]], set[str]]:
-        scores: list[tuple[int, float, int, int]] = []
-        unmapped_codes: set[str] = set()
-        for response_session in sessions:
-            weighted_scores: list[tuple[float, float]] = []
-            n_total = sum(
-                1 for link in construct.item_links if (link.item_role or "SCORED") == "SCORED"
+    async def build_unit_results(self, study_id: int, analysis_run_id: int) -> None:
+        """Agrega por unidad organizacional (área, sede, turno…) los
+        `ConstructScore` que la corrida canónica (`ScoringService.run`) ya
+        calculó — nunca vuelve a puntuar desde las respuestas crudas, para no
+        duplicar el cálculo entre el resultado de estudio y el de unidad
+        (harness: un único `analysis_run_id` por ejecución de "Calcular
+        resultados").
+        """
+        session_units = await self._load_session_units(study_id)
+        if not session_units:
+            return
+        study = await self.study_repo.get(study_id)
+        # Sólo DIMENSION/SUBDIMENSION: el resultado por unidad es un desglose
+        # psicosocial, no el rollup de la variable raíz del instrumento.
+        scores_stmt = (
+            select(ConstructScore)
+            .join(Construct, Construct.id == ConstructScore.construct_id)
+            .where(
+                ConstructScore.analysis_run_id == analysis_run_id,
+                Construct.construct_type.in_(("DIMENSION", "SUBDIMENSION")),
             )
-            for link in construct.item_links:
-                rule = await self.repo.get_scoring_rule_for_question(
-                    instrument_version_id, link.question_id
-                )
-                if rule is None:
-                    continue
-
-                response = await self._get_response(response_session.id, link.question_id)
-                if response is None or response.is_missing:
-                    continue
-
-                values = derive_item_values(
-                    response.raw_code,
-                    rule.parameters.get("risk_map", rule.parameters.get("map", {})),
-                    link.scoring_direction,
-                )
-                if values is None:
-                    if response.raw_code is not None:
-                        unmapped_codes.add(response.raw_code)
-                    continue
-
-                risk_value, score_0_100 = values
-                await self.repo.add_response_score(
-                    ResponseScore(
-                        response_id=response.id,
-                        scoring_rule_id=rule.id,
-                        risk_value=risk_value,
-                        score_0_100=score_0_100,
-                        algorithm_version="censopas-v2",
-                        metadata_={
-                            "analysis_run_id": analysis_run_id,
-                            "construct_id": construct.id,
-                            "direction": link.scoring_direction,
-                        },
-                    )
-                )
-                weighted_scores.append((score_0_100, float(link.weight)))
-
-            total_weight = sum(weight for _, weight in weighted_scores)
-            if total_weight > 0:
-                construct_score = sum(
-                    score * weight for score, weight in weighted_scores
-                ) / total_weight
-                scores.append(
-                    (response_session.id, construct_score, len(weighted_scores), n_total)
-                )
-
-        return scores, unmapped_codes
-
-    async def _get_response(self, response_session_id: int, question_id: int) -> Response | None:
-        stmt = select(Response).where(
-            Response.response_session_id == response_session_id, Response.question_id == question_id
+            .options(selectinload(ConstructScore.band))
         )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+        scores = list((await self.session.execute(scores_stmt)).scalars().all())
 
-    def _build_construct_result(
-        self,
-        study_id: int,
-        analysis_run_id: int,
-        construct: Construct,
-        session_scores: list[float],
-        cutoff,
-        barem: Barem | None,
-    ) -> ConstructResult:
-        n_valid = len(session_scores)
-        construct_score = statistics.fmean(session_scores) if n_valid else None
+        grouped: dict[tuple[int, int, int], list[tuple[float, str | None]]] = {}
+        for score in scores:
+            if score.score_0_100 is None:
+                continue
+            category = score.band.classification_code if score.band else None
+            for unit_type_id, unit_id in session_units.get(score.response_session_id, []):
+                key = (unit_type_id, unit_id, score.construct_id)
+                grouped.setdefault(key, []).append((float(score.score_0_100), category))
 
-        favorable_n = intermediate_n = unfavorable_n = 0
-        collective_classification = None
-
-        if cutoff is not None and n_valid:
-            labels = [
-                classify_construct_score(
-                    score,
-                    float(cutoff.cut_1),
-                    float(cutoff.cut_2),
-                    cutoff.direction,
-                    cutoff.favorable_label,
-                    cutoff.intermediate_label,
-                    cutoff.unfavorable_label,
+        for (unit_type_id, unit_id, construct_id), values in grouped.items():
+            summary = summarize_trichotomy(values)
+            await self.repo.add_construct_result(
+                ConstructResult(
+                    study_id=study_id,
+                    analysis_run_id=analysis_run_id,
+                    construct_id=construct_id,
+                    unit_type_id=unit_type_id,
+                    unit_id=unit_id,
+                    n_valid=summary["n_valid"],
+                    favorable_n=summary["favorable_n"],
+                    intermediate_n=summary["intermediate_n"],
+                    unfavorable_n=summary["unfavorable_n"],
+                    favorable_pct=summary["favorable_pct"],
+                    intermediate_pct=summary["intermediate_pct"],
+                    unfavorable_pct=summary["unfavorable_pct"],
+                    construct_score=summary["construct_score"],
+                    classification=summary["classification"],
+                    classification_status="PROVISIONAL",
+                    barem_id=study.barem_id if study else None,
+                    algorithm_version="censopas-v2",
+                    metadata_={
+                        "aggregation": "STUDY_UNIT",
+                        "min_publishable_n": study.min_publishable_n if study else None,
+                    },
                 )
-                for score in session_scores
-            ]
-            favorable_n = labels.count(cutoff.favorable_label)
-            intermediate_n = labels.count(cutoff.intermediate_label)
-            unfavorable_n = labels.count(cutoff.unfavorable_label)
-            collective_classification = classify_collective_result(
-                (favorable_n / n_valid) * 100,
-                (intermediate_n / n_valid) * 100,
-                (unfavorable_n / n_valid) * 100,
             )
-
-        return ConstructResult(
-            study_id=study_id,
-            analysis_run_id=analysis_run_id,
-            construct_id=construct.id,
-            n_valid=n_valid,
-            favorable_n=favorable_n,
-            intermediate_n=intermediate_n,
-            unfavorable_n=unfavorable_n,
-            favorable_pct=round((favorable_n / n_valid) * 100, 4) if n_valid else None,
-            intermediate_pct=round((intermediate_n / n_valid) * 100, 4) if n_valid else None,
-            unfavorable_pct=round((unfavorable_n / n_valid) * 100, 4) if n_valid else None,
-            construct_score=construct_score,
-            classification=collective_classification,
-            classification_status="PROVISIONAL",
-            barem_id=barem.id if barem else None,
-            algorithm_version="censopas-v2",
-            metadata_={},
-        )
+        await self.session.commit()
 
     async def get_results(self, study_id: int) -> list[ConstructResult]:
         results = await self.repo.list_construct_results(study_id)
@@ -1085,6 +891,11 @@ class CensopasScoringService:
                 )
                 secondary_ids.add(secondary.id)
 
+        barem = await self.repo.get_barem(study.barem_id) if study.barem_id else None
+        official_equivalence_enabled = await resolve_official_equivalence_enabled(
+            self.instrument_repo, study.instrument_version_id
+        )
+
         payload_results = []
         for result in results:
             if result.id in absorbed_ids:
@@ -1093,6 +904,8 @@ class CensopasScoringService:
             privacy = self.apply_privacy(
                 result,
                 result.n_valid + 1 if is_secondary else study.min_publishable_n,
+                barem=barem,
+                official_equivalence_enabled=official_equivalence_enabled,
             )
             unit = units[result.unit_id]
             privacy.update(
@@ -1121,11 +934,15 @@ class CensopasScoringService:
         }
 
     async def _latest_run(self, study_id: int) -> AnalysisRun | None:
+        # Ambos tipos: la corrida canónica ("Calcular resultados") hoy siempre
+        # se crea como LIKERT_SCORING (ScoringService.run vía el orquestador);
+        # CENSOPAS_SCORING se conserva por compatibilidad con corridas previas
+        # a la unificación (ver app/services/scoring_orchestrator.py).
         stmt = (
             select(AnalysisRun)
             .where(
                 AnalysisRun.study_id == study_id,
-                AnalysisRun.analysis_type == "CENSOPAS_SCORING",
+                AnalysisRun.analysis_type.in_(("LIKERT_SCORING", "CENSOPAS_SCORING")),
             )
             .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())
         )
@@ -1271,10 +1088,11 @@ class CensopasScoringService:
             self.session.add(barem)
             await self.session.flush()
             for cutoff_data in payload.cutoffs:
+                construct_id = constructs_by_code[cutoff_data.construct_code].id
                 self.session.add(
                     BaremCutoff(
                         barem_id=barem.id,
-                        construct_id=constructs_by_code[cutoff_data.construct_code].id,
+                        construct_id=construct_id,
                         cut_1=cutoff_data.cut_1,
                         cut_2=cutoff_data.cut_2,
                         direction=cutoff_data.direction,
@@ -1284,6 +1102,25 @@ class CensopasScoringService:
                         metadata_={"content_hash": validation.calculated_hash},
                     )
                 )
+                # El motor de scoring (ScoringService) ejecuta contra BaremBand,
+                # no contra BaremCutoff — sin esto un barem importado nunca
+                # produciría favorable/intermedio/desfavorable al puntuar.
+                for band_kwargs in cutoff_to_bands(
+                    cutoff_data.cut_1,
+                    cutoff_data.cut_2,
+                    cutoff_data.direction,
+                    cutoff_data.favorable_label,
+                    cutoff_data.intermediate_label,
+                    cutoff_data.unfavorable_label,
+                ):
+                    self.session.add(
+                        BaremBand(
+                            barem_id=barem.id,
+                            construct_id=construct_id,
+                            metadata_={"content_hash": validation.calculated_hash},
+                            **band_kwargs,
+                        )
+                    )
             await self.session.commit()
             await self.session.refresh(barem)
         except Exception:
@@ -1666,19 +1503,50 @@ class CensopasScoringService:
             unfavorable_label=payload.unfavorable_label,
         )
         cutoff = await self.repo.add_cutoff(cutoff)
+        for band_kwargs in cutoff_to_bands(
+            cutoff.cut_1,
+            cutoff.cut_2,
+            cutoff.direction,
+            cutoff.favorable_label,
+            cutoff.intermediate_label,
+            cutoff.unfavorable_label,
+        ):
+            self.session.add(
+                BaremBand(barem_id=barem_id, construct_id=payload.construct_id, **band_kwargs)
+            )
         await self.session.commit()
         return cutoff
 
     @staticmethod
-    def apply_privacy(result: ConstructResult, min_publishable_n: int) -> dict:
+    def apply_privacy(
+        result: ConstructResult,
+        min_publishable_n: int,
+        *,
+        barem: Barem | None = None,
+        official_equivalence_enabled: bool = False,
+    ) -> dict:
         suppressed = not PrivacyService.can_publish_group(result.n_valid, min_publishable_n)
+        # "Resultado oficial CENSOPAS" nunca puede mostrarse si el baremo no
+        # es OFFICIAL o si el instrumento no habilitó la equivalencia oficial
+        # (harness §31 + convención CENSOPAS_PROJECT_PROVISIONING: el baremo
+        # de referencia demo siempre queda REFERENCE/official_equivalence=False).
+        methodological_status = resolve_censopas_methodological_status(
+            barem, official_equivalence_enabled
+        )
+        barem_status = methodological_status["barem_status"]
+        official_equivalence = methodological_status["official_equivalence"]
         data = {
             "construct_id": result.construct_id,
             "construct_code": result.construct.code,
             "construct_name": result.construct.name,
+            "construct_type": result.construct.construct_type,
             "n_valid": result.n_valid,
             "suppressed": suppressed,
+            "suppression_reason": "BELOW_MINIMUM_N" if suppressed else None,
             "classification_status": result.classification_status,
+            "barem_id": result.barem_id,
+            "barem_status": barem_status,
+            "official_equivalence": official_equivalence,
         }
         if suppressed:
             data.update(
@@ -1703,3 +1571,22 @@ class CensopasScoringService:
                 collective_classification=result.classification,
             )
         return data
+
+    @staticmethod
+    def attach_priority_ranks(payload: list[dict]) -> list[dict]:
+        """Asigna `priority_rank` por `% desfavorable` DESC, agrupado por
+        `construct_type` (D1-D6 se rankean entre sí; S1-S20, aparte) — el
+        frontend nunca debe recalcular este orden (harness: fuente única).
+        """
+        by_type: dict[str, list[dict]] = {}
+        for row in payload:
+            by_type.setdefault(row["construct_type"], []).append(row)
+        for rows in by_type.values():
+            ranked = sorted(
+                (row for row in rows if not row["suppressed"]),
+                key=lambda row: row["unfavorable_pct"] or 0.0,
+                reverse=True,
+            )
+            for rank, row in enumerate(ranked, start=1):
+                row["priority_rank"] = rank
+        return payload

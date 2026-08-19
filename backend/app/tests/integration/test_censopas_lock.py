@@ -222,6 +222,19 @@ async def test_validate_and_import_short_manifest_transactionally(
     assert imported_barem["status"] == "DRAFT"
     assert imported_barem["cutoffs_imported"] == 6
 
+    # El motor de scoring ejecuta contra BaremBand, no contra BaremCutoff —
+    # sin bandas derivadas un barem importado nunca produciría
+    # favorable/intermedio/desfavorable al puntuar (ver auditoría Resultados).
+    barems_resp = await client.get(f"/api/v1/instrument-versions/{version.id}/barems")
+    assert barems_resp.status_code == 200, barems_resp.text
+    imported = next(b for b in barems_resp.json() if b["id"] == imported_barem["barem_id"])
+    assert len(imported["bands"]) == 18  # 6 cortes x 3 bandas (FAVORABLE/INTERMEDIATE/UNFAVORABLE)
+    assert {band["classification_code"] for band in imported["bands"]} == {
+        "FAVORABLE",
+        "INTERMEDIATE",
+        "UNFAVORABLE",
+    }
+
     activation_resp = await client.post(
         f"/api/v1/barems/{imported_barem['barem_id']}/activate"
     )

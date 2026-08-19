@@ -5,6 +5,30 @@ import json
 from httpx import AsyncClient
 
 
+async def _second_study(client: AsyncClient, seed_user, seed_project, version_id: int):
+    """Segundo estudio sobre la misma versión de instrumento, sin agregar
+    ítems nuevos (la versión ya queda bloqueada para edición en cuanto el
+    primer estudio abre sesiones de respuesta)."""
+    survey = (
+        await client.post(
+            f"/api/v1/projects/{seed_project.id}/surveys/from-instrument",
+            json={
+                "created_by_user_id": seed_user.id,
+                "instrument_version_id": version_id,
+                "name": "Encuesta BSC 2",
+            },
+        )
+    ).json()
+    study = (
+        await client.post(
+            f"/api/v1/projects/{seed_project.id}/studies",
+            json={"survey_id": survey["id"], "name": "Estudio BSC 2", "study_type": "ACADEMIC"},
+        )
+    ).json()
+    await client.post(f"/api/v1/studies/{study['id']}/open")
+    return study
+
+
 async def _basic_study(client: AsyncClient, seed_user, seed_project, seed_instrument_draft):
     _instrument, version = seed_instrument_draft
     item = (
@@ -271,3 +295,249 @@ async def test_report_includes_action_plan_premium_and_traceability(
         "/api/v1/reports/{}/download".format(pdf_resp.json()["id"])
     )
     assert pdf_download.content[:5] == b"%PDF-"
+
+
+async def _plan_and_item(client: AsyncClient, study_id: int, **item_kwargs):
+    plan = (
+        await client.post(
+            f"/api/v1/studies/{study_id}/action-plans", json={"name": "Plan preventivo"}
+        )
+    ).json()
+    payload = {"title": "Acción", "action_description": "Medida preventiva"} | item_kwargs
+    item = (await client.post(f"/api/v1/action-plans/{plan['id']}/items", json=payload)).json()
+    return plan, item
+
+
+async def test_kpi_queda_vinculado_a_action_plan_item(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    _plan, item = await _plan_and_item(client, study["id"])
+
+    kpi = (
+        await client.post(
+            f"/api/v1/studies/{study['id']}/kpis",
+            json={"action_plan_item_id": item["id"], "name": "Cumplimiento"},
+        )
+    ).json()
+    assert kpi["action_plan_item_id"] == item["id"]
+
+    kpis = (await client.get(f"/api/v1/studies/{study['id']}/kpis")).json()
+    assert kpis[0]["action_plan_item_id"] == item["id"]
+
+
+async def test_origin_hypothesis_round_trip(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    _plan, item = await _plan_and_item(
+        client,
+        study["id"],
+        finding="Alta exposición en D1",
+        origin_hypothesis="Carga elevada, plazos cortos o interrupciones.",
+        action_description="Redistribuir la carga semanal.",
+    )
+    assert item["finding"] == "Alta exposición en D1"
+    assert item["origin_hypothesis"] == "Carga elevada, plazos cortos o interrupciones."
+    assert item["action_description"] == "Redistribuir la carga semanal."
+    # Los tres campos permanecen separados, no fusionados en uno solo.
+    assert item["finding"] != item["origin_hypothesis"] != item["action_description"]
+
+
+async def test_analysis_run_id_round_trip(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    correlation = await client.post(
+        f"/api/v1/studies/{study['id']}/analytics/correlation",
+        json={"variable_x_id": var["id"], "variable_y_id": var["id"]},
+    )
+    run_id = correlation.json()["id"]
+
+    _plan, item = await _plan_and_item(client, study["id"], analysis_run_id=run_id)
+    assert item["analysis_run_id"] == run_id
+
+
+async def test_analysis_run_id_de_otro_estudio_es_rechazado(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    _instrument, version = seed_instrument_draft
+    study, var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    other_study = await _second_study(client, seed_user, seed_project, version.id)
+    for value in (1, 2, 3):
+        rs = (await client.post(f"/api/v1/studies/{other_study['id']}/response-sessions")).json()
+        await client.put(
+            f"/api/v1/response-sessions/{rs['id']}/responses/1", json={"numeric_value": value}
+        )
+        await client.post(f"/api/v1/response-sessions/{rs['id']}/complete")
+    correlation = await client.post(
+        f"/api/v1/studies/{other_study['id']}/analytics/correlation",
+        json={"variable_x_id": var["id"], "variable_y_id": var["id"]},
+    )
+    run_id = correlation.json()["id"]
+
+    plan = (
+        await client.post(
+            f"/api/v1/studies/{study['id']}/action-plans", json={"name": "Plan preventivo"}
+        )
+    ).json()
+    resp = await client.post(
+        f"/api/v1/action-plans/{plan['id']}/items",
+        json={
+            "title": "Acción",
+            "action_description": "Medida",
+            "analysis_run_id": run_id,
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_kpi_current_value_es_la_ultima_medicion(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    kpi = (
+        await client.post(f"/api/v1/studies/{study['id']}/kpis", json={"name": "% asistencia"})
+    ).json()
+    assert kpi["current_value"] is None
+
+    await client.post(
+        f"/api/v1/kpis/{kpi['id']}/measurements",
+        json={"measured_at": "2026-01-01T00:00:00Z", "numeric_value": 40},
+    )
+    await client.post(
+        f"/api/v1/kpis/{kpi['id']}/measurements",
+        json={"measured_at": "2026-06-01T00:00:00Z", "numeric_value": 75},
+    )
+
+    kpis = (await client.get(f"/api/v1/studies/{study['id']}/kpis")).json()
+    assert kpis[0]["current_value"] == 75.0
+    assert kpis[0]["current_measurement_at"].startswith("2026-06-01")
+
+
+async def test_effective_status_overdue(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    _plan, item = await _plan_and_item(client, study["id"], due_date="2020-01-01")
+    assert item["status"] == "PENDING"
+    assert item["effective_status"] == "OVERDUE"
+
+
+async def test_done_nunca_se_convierte_en_overdue(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    _plan, item = await _plan_and_item(client, study["id"], due_date="2020-01-01")
+
+    updated = (
+        await client.patch(f"/api/v1/action-plan-items/{item['id']}", json={"status": "DONE"})
+    ).json()
+    assert updated["status"] == "DONE"
+    assert updated["effective_status"] == "DONE"
+
+
+async def test_accion_no_transporta_valores_de_resultado_suprimido(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    """El contrato de creación de acciones no tiene ningún campo de porcentaje
+    o conteo: aunque un cliente intente enviarlos, Pydantic los ignora (no
+    hay forma de que un valor suprimido llegue a `ActionPlanItem`)."""
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    plan = (
+        await client.post(
+            f"/api/v1/studies/{study['id']}/action-plans", json={"name": "Plan preventivo"}
+        )
+    ).json()
+    resp = await client.post(
+        f"/api/v1/action-plans/{plan['id']}/items",
+        json={
+            "title": "Medida organizacional genérica",
+            "action_description": "Redistribuir carga del área.",
+            "finding": "Prioridad preventiva D1",
+            "unfavorable_pct": 44.4,
+            "n_valid": 3,
+            "suppressed": True,
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert "unfavorable_pct" not in body
+    assert "n_valid" not in body
+    assert "suppressed" not in body
+
+
+async def test_varias_acciones_por_el_mismo_constructo(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    plan = (
+        await client.post(
+            f"/api/v1/studies/{study['id']}/action-plans", json={"name": "Plan preventivo"}
+        )
+    ).json()
+    for title in ("Acción A", "Acción B", "Acción C"):
+        await client.post(
+            f"/api/v1/action-plans/{plan['id']}/items",
+            json={"title": title, "action_description": "Medida", "construct_id": 1},
+        )
+    items = (await client.get(f"/api/v1/action-plans/{plan['id']}/items")).json()
+    assert len({item["id"] for item in items}) == 3
+    assert all(item["construct_id"] == 1 for item in items)
+
+
+async def test_varios_kpi_por_la_misma_accion(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, _var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    _plan, item = await _plan_and_item(client, study["id"])
+    for name in ("% asistencia", "Horas extra promedio"):
+        await client.post(
+            f"/api/v1/studies/{study['id']}/kpis",
+            json={"action_plan_item_id": item["id"], "name": name},
+        )
+    kpis = (await client.get(f"/api/v1/studies/{study['id']}/kpis")).json()
+    assert len(kpis) == 2
+    assert all(kpi["action_plan_item_id"] == item["id"] for kpi in kpis)
+
+
+async def test_report_conserva_campos_nuevos_del_plan_preventivo(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    study, var = await _basic_study(client, seed_user, seed_project, seed_instrument_draft)
+    correlation = await client.post(
+        f"/api/v1/studies/{study['id']}/analytics/correlation",
+        json={"variable_x_id": var["id"], "variable_y_id": var["id"]},
+    )
+    run_id = correlation.json()["id"]
+
+    _plan, item = await _plan_and_item(
+        client,
+        study["id"],
+        finding="Alta exposición en D1",
+        origin_hypothesis="Carga elevada.",
+        analysis_run_id=run_id,
+        due_date="2020-01-01",
+    )
+    await client.post(
+        f"/api/v1/studies/{study['id']}/kpis",
+        json={"action_plan_item_id": item["id"], "name": "% asistencia", "target_value": 90},
+    )
+    kpis = (await client.get(f"/api/v1/studies/{study['id']}/kpis")).json()
+    await client.post(
+        f"/api/v1/kpis/{kpis[0]['id']}/measurements",
+        json={"measured_at": "2026-06-01T00:00:00Z", "numeric_value": 75},
+    )
+
+    report_resp = await client.post(
+        f"/api/v1/studies/{study['id']}/reports",
+        json={"output_format": "JSON", "sections": ["plan_accion"]},
+    )
+    bundle = json.loads(
+        (await client.get(f"/api/v1/reports/{report_resp.json()['id']}/download")).text
+    )
+    action = bundle["action_plans"][0]["items"][0]
+    assert action["analysis_run_id"] == run_id
+    assert action["origin_hypothesis"] == "Carga elevada."
+    assert action["effective_status"] == "OVERDUE"
+    assert action["kpis"][0]["current_value"] == 75.0

@@ -1,6 +1,6 @@
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-import { semanticBandColor } from '../../../utils/chartColors.js';
+import { riskColorFor, semanticBandColor } from '../../../utils/chartColors.js';
 import { dominantBand, unfavorablePct } from '../../../utils/scoringResults.js';
 import { formatPercent } from '../../../utils/format.js';
 import { EmptyState } from '../../ui/EmptyState.jsx';
@@ -14,12 +14,15 @@ export default function PriorityBarChart({ rows, emptyTitle = 'Sin filas publica
     return <EmptyState title={emptyTitle} description={emptyDescription || 'Calcula el scoring para ver el ranking.'} />;
   }
 
-  const data = rows.map((row) => ({
-    name: row.construct_name,
-    code: row.construct_code,
-    value: unfavorablePct(row),
-    fill: dominantBand(row)?.color_hint || semanticBandColor(dominantBand(row)?.label),
-  }));
+  const data = rows.map((row) => {
+    const band = dominantBand(row);
+    return {
+      name: row.construct_name,
+      code: row.construct_code,
+      value: unfavorablePct(row),
+      fill: band?.color_hint || (band?.code ? riskColorFor(band.code) : semanticBandColor(band?.label)),
+    };
+  });
 
   const height = Math.max(220, data.length * 34);
 

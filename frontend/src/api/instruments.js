@@ -47,6 +47,10 @@ export function getCensopasReadiness(versionId) {
   return apiRequest("/instrument-versions/" + versionId + "/censopas/readiness");
 }
 
+export function getCensopasPlans() {
+  return apiRequest('/censopas/plans');
+}
+
 export function getInstrumentTree(versionId) {
   return apiRequest(`/instrument-versions/${versionId}/tree`);
 }

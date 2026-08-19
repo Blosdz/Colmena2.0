@@ -41,8 +41,12 @@ class ActionPlanItem(Base, TimestampMixin):
         BigInteger, ForeignKey("action_plans.id", ondelete="CASCADE"), nullable=False
     )
     construct_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("constructs.id"))
+    analysis_run_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("analysis_runs.id", ondelete="SET NULL")
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     finding: Mapped[str | None] = mapped_column(Text)
+    origin_hypothesis: Mapped[str | None] = mapped_column(Text)
     action_description: Mapped[str] = mapped_column(Text, nullable=False)
     responsible_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"))
     responsible_label: Mapped[str | None] = mapped_column(String(255))

@@ -22,22 +22,84 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.action_plan_status import compute_effective_status
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.analysis import AnalysisResult, AnalysisRun
 from app.models.bsc import ActionPlan, ActionPlanItem, Kpi
 from app.models.censopas import Barem
 from app.models.construct import Construct
+from app.models.project import Project
+from app.models.user import Organization, User
 from app.repositories.analytics import AnalyticsRepository
 from app.repositories.reports import ReportRepository
 from app.repositories.studies import StudyRepository
 from app.schemas.reports import ReportRunCreate, ReportTemplateCreate
+from app.services.censopas_methodology import (
+    resolve_censopas_methodological_status,
+    resolve_official_equivalence_enabled,
+)
 from app.services.censopas_service import CensopasScoringService
+from app.services.response_descriptive_service import ResponseDescriptiveService
 from app.services.scoring_service import ScoringService
+from app.services.telemetry_service import TelemetryService
+
+# Fase 4: separar D1-D6 de S1-S20 en cualquier consumidor del bundle —
+# nunca filtrar por posición en la lista, siempre por `construct_type` real.
+_DIMENSION_TYPE = "DIMENSION"
+_SUBDIMENSION_TYPE = "SUBDIMENSION"
+
+_CONFIDENTIALITY_NOTICE = (
+    "Documento de uso interno del Comité/Grupo de Trabajo de Seguridad y Salud en el "
+    "Trabajo. Contiene resultados colectivos únicamente — no incluye identificadores "
+    "de participantes ni registros individuales."
+)
+
+
+def _trichotomy_lines(results: list[dict], min_publishable_n: int | None) -> list[str]:
+    """Fase 11: misma fuente y mismos campos que la tabla DOCX
+    (`favorable/intermediate/unfavorable_pct` + n válido + clasificación
+    colectiva) — antes el PDF usaba menos campos que el DOCX, esto cierra
+    GAP-REPORT-PDF-PARITY para D1-D6/S1-S20."""
+    lines = []
+    for result in results:
+        code = result.get("construct_code") or "—"
+        name = result.get("construct_name") or "—"
+        if result.get("suppressed"):
+            hidden = f"Oculto (n<{min_publishable_n})" if min_publishable_n else "Oculto"
+            lines.append(f"{code} · {name} · {hidden}")
+            continue
+        classification = _CLASSIFICATION_LABELS_PDF.get(
+            result.get("collective_classification"), result.get("collective_classification") or "—"
+        )
+        lines.append(
+            f"{code} · {name} · Favorable {result.get('favorable_n', '—')} "
+            f"({_pct(result.get('favorable_pct'))}) · Intermedio {result.get('intermediate_n', '—')} "
+            f"({_pct(result.get('intermediate_pct'))}) · Desfavorable {result.get('unfavorable_n', '—')} "
+            f"({_pct(result.get('unfavorable_pct'))}) · n válido={result.get('n_valid', '—')} · "
+            f"clasificación={classification}"
+        )
+    return lines
+
+
+def _pct(value: float | None) -> str:
+    return f"{value:.1f}%" if value is not None else "—"
+
+
+_CLASSIFICATION_LABELS_PDF = {
+    "RIESGO_ALTO": "Riesgo alto",
+    "FACTOR_PROTECTOR": "Factor protector",
+    "RIESGO_MEDIO": "Riesgo medio",
+    "REVISION": "Requiere revisión",
+}
 
 
 def _render_report_pdf(bundle: dict) -> bytes:
-    """Render PDF multipágina desde el mismo bundle, sin datos individuales."""
+    """Render PDF multipágina desde el mismo bundle, sin datos individuales.
+    Fase 11: mismas secciones metodológicas que el DOCX — el layout es texto
+    plano por página, pero el contenido (perfil sociolaboral, D1-D6/S1-S20
+    separados, interpretación, priorización, plan preventivo completo,
+    conclusiones) es semánticamente equivalente."""
     import io
     import textwrap
 
@@ -48,24 +110,9 @@ def _render_report_pdf(bundle: dict) -> bytes:
     selected_sections = set(bundle.get("sections") or [])
     pages_rendered = 0
 
-    def add_page(pdf, title: str, lines: list[str]) -> None:
+    def add_page(pdf, title: str, lines: list[str], section_keys: set[str] | None) -> None:
         nonlocal pages_rendered
-        section_keys = (
-            {"trazabilidad", "ficha_tecnica"}
-            if title == "Estado metodológico"
-            else {"resultados_globales", "dimensiones", "subdimensiones", "unidades_seguras"}
-            if title == "Resultados CENSOPAS"
-            else {"plan_accion"}
-            if title == "Plan de acción"
-            else {"hallazgos_premium"}
-            if title == "Analítica premium"
-            else {"anexos", "trazabilidad"}
-            if title == "Anexos y trazabilidad"
-            else {"variables_descriptivas"}
-            if title == "Analítica complementaria"
-            else {"portada"}
-        )
-        if selected_sections and not selected_sections.intersection(section_keys):
+        if section_keys is not None and selected_sections and not selected_sections.intersection(section_keys):
             return
         pages_rendered += 1
         figure = plt.figure(figsize=(8.27, 11.69), dpi=120)
@@ -86,19 +133,48 @@ def _render_report_pdf(bundle: dict) -> bytes:
 
     with PdfPages(output) as pdf:
         study = bundle.get("study") or {}
-        mode = bundle.get("report_mode", "PROVISIONAL")
+        cover = bundle.get("cover") or {}
+        label = bundle.get("methodological_label") or {}
+        equivalence_line = (
+            "Equivalente al resultado oficial CENSOPAS-COPSOQ"
+            if label.get("official_equivalence")
+            else "No equivalente al resultado oficial CENSOPAS-COPSOQ"
+        )
         add_page(
             pdf,
             study.get("name") or "Reporte",
             [
-                "Reporte oficial CENSOPAS-COPSOQ"
-                if mode == "OFFICIAL"
-                else "Reporte provisional — sin equivalencia oficial",
-                f"Tipo de estudio: {study.get('study_type', '—')}",
-                f"Estado: {study.get('status', '—')}",
+                f"{label.get('label', 'Baremo de referencia')} — {equivalence_line}",
+                f"Instrumento: {cover.get('instrument_label') or 'CENSOPAS-COPSOQ'} · "
+                f"Versión: {cover.get('version_kind') or 'UNKNOWN'}",
+                f"Organización: {cover.get('organization_name') or '—'}",
+                f"Código del estudio: {cover.get('study_code') or '—'}",
+                f"Período: {cover.get('period_start') or '—'} – {cover.get('period_end') or '—'}",
+                f"Evaluador/responsable: {cover.get('evaluator_label') or '—'}",
                 f"Generado: {bundle.get('generated_at', '—')}",
+                cover.get("confidentiality_notice") or "",
             ],
+            {"portada"},
         )
+        summary = bundle.get("executive_summary") or {}
+        summary_lines = [summary.get("headline") or "Sin datos suficientes para un resumen."]
+        if summary.get("n_valid") is not None:
+            summary_lines.append(f"Respuestas válidas: {summary['n_valid']}")
+        if summary.get("completion_rate") is not None:
+            summary_lines.append(f"Tasa de finalización: {summary['completion_rate'] * 100:.1f}%")
+        summary_lines.append(
+            f"Baremo: {summary.get('barem_status') or '—'} · "
+            f"Equivalencia oficial: {'sí' if summary.get('official_equivalence') else 'no'}"
+        )
+        for dimension in summary.get("priority_dimensions") or []:
+            dim_label = dimension.get("construct_name") or dimension.get("construct_code") or "—"
+            pct = dimension.get("unfavorable_pct")
+            pct_label = f"{pct:.1f}%" if pct is not None else "—"
+            summary_lines.append(
+                f"Prioritaria: {dim_label} · {pct_label} desfavorable · {dimension.get('classification') or '—'}"
+            )
+        add_page(pdf, "Resumen ejecutivo", summary_lines, {"resumen_ejecutivo"})
+
         readiness = bundle.get("methodological_status") or {}
         add_page(
             pdf,
@@ -106,65 +182,140 @@ def _render_report_pdf(bundle: dict) -> bytes:
             [
                 f"Versión: {readiness.get('version_kind', 'UNKNOWN')}",
                 f"Listo para scoring: {readiness.get('ready_for_scoring', False)}",
-                "Equivalencia oficial: "
-                + ("habilitada" if readiness.get("ready_for_official_reporting") else "no habilitada"),
-                "Conteos esperados: " + json.dumps(readiness.get("expected", {}), ensure_ascii=False),
-                "Conteos actuales: " + json.dumps(readiness.get("actual", {}), ensure_ascii=False),
+                f"Baremo: {label.get('label', 'Baremo de referencia')}. {equivalence_line}.",
                 "Bloqueos: " + ", ".join(readiness.get("errors", [])),
                 "Advertencias: " + ", ".join(readiness.get("warnings", [])),
             ],
+            {"trazabilidad", "ficha_tecnica"},
         )
-        construct_lines = []
-        for result in bundle.get("censopas_results") or []:
-            if result.get("suppressed"):
-                construct_lines.append(
-                    f"{result.get('construct_code', '—')} · resultado suprimido (n={result.get('n_valid', 0)})"
-                )
-            else:
-                construct_lines.append(
-                    f"{result.get('construct_code', '—')} · n={result.get('n_valid', 0)} · "
-                    f"score={result.get('construct_score', '—')} · "
-                    f"clasificación={result.get('collective_classification', '—')}"
-                )
+
+        data_quality = bundle.get("data_quality") or {}
+        traceability = bundle.get("traceability") or {}
+        min_publishable_n = (traceability.get("privacy") or {}).get("min_publishable_n")
+        barem_trace = traceability.get("barem") or {}
         add_page(
             pdf,
-            "Resultados CENSOPAS",
-            construct_lines or ["No hay resultados CENSOPAS persistidos para este estudio."],
+            "Ficha técnica",
+            [
+                f"Instrumento: {study.get('instrument_name') or 'CENSOPAS-COPSOQ'}",
+                f"Versión del instrumento: {study.get('instrument_version_code') or '—'}",
+                "Población convocada: No disponible en el sistema (sin registro de convocatoria)",
+                f"Respondieron (sesiones iniciadas): {data_quality.get('started_count', '—')}",
+                f"Válidos: {data_quality.get('valid_count', '—')}",
+                f"Excluidos: {data_quality.get('excluded_count', '—')}",
+                "Tasa válida: " + _format_percentage_pdf(data_quality.get("completion_rate")),
+                f"Baremo aplicado: {barem_trace.get('name') or '—'}",
+                f"Equivalencia oficial: {'habilitada' if label.get('official_equivalence') else 'no habilitada'}",
+                f"N mínimo publicable: {min_publishable_n if min_publishable_n is not None else '—'}",
+            ],
+            {"ficha_tecnica"},
         )
+
+        add_page(
+            pdf,
+            "Calidad de datos",
+            [
+                f"Sesiones iniciadas: {data_quality.get('started_count', '—')}",
+                f"Completadas: {data_quality.get('completed_count', '—')}",
+                f"Válidas: {data_quality.get('valid_count', '—')}",
+                f"Abandonadas: {data_quality.get('abandoned_count', '—')}",
+                f"En revisión: {data_quality.get('review_count', '—')}",
+                f"Excluidas: {data_quality.get('excluded_count', '—')}",
+                "Tasa de finalización: " + _format_percentage_pdf(data_quality.get("completion_rate")),
+            ]
+            if data_quality
+            else ["Todavía no hay telemetría persistida para este estudio."],
+            {"calidad_datos"},
+        )
+
+        sociolaboral_lines = []
+        for question in bundle.get("sociolaboral_profile") or []:
+            for category in question.get("categories") or []:
+                if category.get("suppressed"):
+                    sociolaboral_lines.append(
+                        f"{question.get('label')} · {category.get('label')} · Oculto (n<{min_publishable_n})"
+                    )
+                else:
+                    sociolaboral_lines.append(
+                        f"{question.get('label')} · {category.get('label')} · "
+                        f"n={category.get('n')} ({_pct(category.get('percentage'))})"
+                    )
+        add_page(
+            pdf,
+            "Perfil sociolaboral",
+            sociolaboral_lines
+            or ["Este estudio no tiene variables sociolaborales descriptivas provisionadas."],
+            {"variables_descriptivas"},
+        )
+
+        dimension_results = bundle.get("dimension_results") or []
+        add_page(
+            pdf,
+            "Resultados por dimensión (D1-D6)",
+            _trichotomy_lines(dimension_results, min_publishable_n)
+            or ["Este estudio todavía no tiene resultados por dimensión calculados."],
+            {"dimensiones", "resultados_globales"},
+        )
+
+        if cover.get("version_kind") == "MEDIUM":
+            subdimension_results = bundle.get("subdimension_results") or []
+            add_page(
+                pdf,
+                "Resultados por subdimensión (S1-S20)",
+                _trichotomy_lines(subdimension_results, min_publishable_n)
+                or ["Este estudio todavía no tiene resultados por subdimensión calculados."],
+                {"subdimensiones"},
+            )
+
+        interpretation_lines = []
+        for entry in bundle.get("interpretation") or []:
+            interpretation_lines.append(
+                f"{entry.get('construct_name') or entry.get('construct_code') or '—'} — "
+                f"Hallazgo: {entry.get('finding') or '—'}"
+            )
+            if entry.get("classification"):
+                interpretation_lines.append(f"  Clasificación: {entry['classification']}")
+            hypotheses = entry.get("origin_hypothesis") or []
+            interpretation_lines.append(
+                "  Hipótesis de origen a contrastar: "
+                + ("; ".join(hypotheses) if hypotheses else "sin registrar todavía.")
+            )
+            orientations = entry.get("preventive_orientation") or []
+            interpretation_lines.append(
+                "  Orientación preventiva: " + ("; ".join(orientations) if orientations else "—")
+            )
+            interpretation_lines.append(f"  Limitación: {entry.get('limitation') or '—'}")
+        add_page(
+            pdf,
+            "Interpretación de resultados",
+            interpretation_lines or ["Sin resultados publicables todavía para interpretar."],
+            {"dimensiones", "resultados_globales", "subdimensiones"},
+        )
+
+        priority_lines = [
+            "El siguiente orden es una ayuda de priorización preventiva calculada por el "
+            "backend; no es una clasificación oficial adicional de CENSOPAS-COPSOQ."
+        ]
+        for row in bundle.get("priority_ranking") or []:
+            priority_lines.append(
+                f"#{row.get('priority_rank') or '—'} · {row.get('construct_code') or ''} "
+                f"{row.get('construct_name') or '—'} · {_pct(row.get('unfavorable_pct'))} desfavorable · "
+                f"n={row.get('n_valid') or '—'}"
+            )
+        add_page(
+            pdf,
+            "Priorización preventiva",
+            priority_lines,
+            {"dimensiones", "resultados_globales", "subdimensiones"},
+        )
+
         analysis_lines = [
             f"{result.get('result_code') or '—'} · {result.get('result_type', '—')} · "
             f"n={result.get('n_valid', '—')} · p={result.get('p_value', '—')}"
             for result in (bundle.get("analysis_results") or [])[:50]
         ]
         if analysis_lines:
-            add_page(pdf, "Analítica complementaria", analysis_lines)
-
-        action_lines = []
-        for plan in bundle.get("action_plans") or []:
-            action_lines.append(
-                f"{plan.get('name') or 'Plan de acción'} · estado={plan.get('status') or '—'} · "
-                f"{'aprobado' if plan.get('approved') else 'pendiente de aprobación'}"
-            )
-            for item in plan.get("items") or []:
-                action_lines.append(
-                    f"P{item.get('priority') or '—'} · {item.get('construct_code') or '—'} · "
-                    f"{item.get('action_description') or item.get('title') or '—'} · "
-                    f"responsable={item.get('responsible_label') or '—'} · fecha={item.get('due_date') or '—'}"
-                )
-                for kpi in item.get("kpis") or []:
-                    latest = kpi.get("latest_measurement") or {}
-                    value = latest.get("numeric_value")
-                    if value is None:
-                        value = latest.get("text_value") or "sin medición"
-                    action_lines.append(
-                        f"KPI {kpi.get('code') or '—'}: {kpi.get('name') or '—'} · "
-                        f"meta={kpi.get('target_value') or '—'} · último={value}"
-                    )
-        add_page(
-            pdf,
-            "Plan de acción",
-            action_lines or ["No hay planes de acción registrados para este estudio."],
-        )
+            add_page(pdf, "Resultados de análisis estadístico", analysis_lines, {"hallazgos_premium"})
 
         premium = bundle.get("premium_analytics") or {}
         premium_lines = [
@@ -179,26 +330,80 @@ def _render_report_pdf(bundle: dict) -> bytes:
                 f"n={result.get('n_valid') or '—'} · p={result.get('adjusted_p_value') or result.get('p_value') or '—'}"
             )
         premium_lines.extend(premium.get("limitations") or [])
-        add_page(pdf, "Analítica premium", premium_lines)
+        add_page(pdf, "Analítica premium", premium_lines, {"hallazgos_premium"})
 
-        traceability = bundle.get("traceability") or {}
+        action_lines = []
+        for plan in bundle.get("action_plans") or []:
+            action_lines.append(
+                f"{plan.get('name') or 'Plan de acción'} · estado={plan.get('status') or '—'} · "
+                f"{'aprobado' if plan.get('approved') else 'pendiente de aprobación'}"
+            )
+            for item in plan.get("items") or []:
+                action_lines.append(
+                    f"P{item.get('priority') or '—'} · {item.get('construct_code') or '—'} · "
+                    f"hallazgo={item.get('finding') or '—'} · "
+                    f"hipótesis={item.get('origin_hypothesis') or '—'}"
+                )
+                action_lines.append(
+                    f"  medida={item.get('action_description') or item.get('title') or '—'} · "
+                    f"responsable={item.get('responsible_label') or '—'} · fecha={item.get('due_date') or '—'} · "
+                    f"estado={item.get('effective_status') or item.get('status') or '—'}"
+                )
+                for kpi in item.get("kpis") or []:
+                    current = kpi.get("current_value")
+                    if current is None:
+                        latest = kpi.get("latest_measurement") or {}
+                        current = latest.get("text_value") or "sin medición"
+                    action_lines.append(
+                        f"  KPI {kpi.get('code') or '—'}: {kpi.get('name') or '—'} · "
+                        f"línea base={kpi.get('baseline_value') if kpi.get('baseline_value') is not None else '—'} · "
+                        f"actual={current} · meta={kpi.get('target_value') if kpi.get('target_value') is not None else '—'} · "
+                        f"unidad={kpi.get('unit') or '—'}"
+                    )
+        add_page(
+            pdf,
+            "Plan de acción",
+            action_lines or ["No hay planes de acción registrados para este estudio."],
+            {"plan_accion"},
+        )
+
+        add_page(
+            pdf,
+            "Conclusiones",
+            bundle.get("conclusions") or ["Sin datos suficientes para conclusiones todavía."],
+            {"conclusiones", "resumen_ejecutivo"},
+        )
+
         barem = traceability.get("barem") or {}
         trace_lines = [
+            f"report_run_id: {traceability.get('report_run_id') or '—'}",
+            f"study_id: {traceability.get('study_id') or '—'} · código: {traceability.get('study_code') or '—'}",
+            f"analysis_run_id: {traceability.get('analysis_run_id') or '—'}",
             f"Versión: {traceability.get('version_kind') or '—'}",
+            f"instrument_version_id: {traceability.get('instrument_version_id') or '—'}",
             f"Hash del manifiesto: {traceability.get('manifest_hash') or '—'}",
             "Linaje: " + " → ".join(traceability.get("lineage") or []),
-            f"Baremo: {barem.get('name') or '—'} · versión {barem.get('version') or '—'}",
+            f"Baremo: {barem.get('name') or '—'} · versión {barem.get('version') or '—'} · "
+            f"id={barem.get('id') or '—'} · estado={barem.get('type') or '—'}",
             f"Hash del baremo: {barem.get('content_hash') or '—'}",
+            f"Equivalencia oficial: {'sí' if traceability.get('official_equivalence') else 'no'}",
             "Registros individuales incluidos: no",
         ]
+        exclusions = traceability.get("exclusions") or {}
+        if exclusions:
+            trace_lines.append(
+                f"Exclusiones: excluidas={exclusions.get('excluded_count') or 0} · "
+                f"abandonadas={exclusions.get('abandoned_count') or 0} · "
+                f"en revisión={exclusions.get('review_count') or 0} — {exclusions.get('criteria') or ''}"
+            )
         for run in traceability.get("analysis_runs") or []:
             trace_lines.append(
                 f"Ejecución {run.get('analysis_type') or '—'} · estado={run.get('status') or '—'} · "
                 f"algoritmo={run.get('algorithm_version') or '—'} · hash={run.get('input_hash') or '—'}"
             )
-        add_page(pdf, "Anexos y trazabilidad", trace_lines)
+        add_page(pdf, "Anexos y trazabilidad", trace_lines, {"anexos", "trazabilidad"})
+
         if pages_rendered == 0:
-            selected_sections.clear()
             add_page(
                 pdf,
                 "Secciones seleccionadas",
@@ -207,9 +412,16 @@ def _render_report_pdf(bundle: dict) -> bytes:
                     "para este estudio.",
                     "Selección: " + ", ".join(bundle.get("sections") or []),
                 ],
+                None,
             )
 
     return output.getvalue()
+
+
+def _format_percentage_pdf(ratio: float | None) -> str:
+    if ratio is None:
+        return "—"
+    return f"{ratio * 100:.1f}%"
 
 
 class ReportService:
@@ -267,6 +479,7 @@ class ReportService:
                 payload.analysis_run_id,
                 report_mode=payload.report_mode,
                 sections=payload.sections,
+                report_run=report_run,
             )
 
             storage_dir = Path(get_settings().export_storage_dir).parent / "reports_storage"
@@ -309,25 +522,41 @@ class ReportService:
         *,
         report_mode: str = "PROVISIONAL",
         sections: list[str] | None = None,
+        report_run=None,
     ) -> dict:
         bundle: dict = {
             "study": {
                 "id": study.id,
                 "public_id": str(study.public_id),
+                "code": f"EST-{study.id:06d}",
                 "name": study.name,
                 "study_type": study.study_type,
                 "status": study.status,
+                "period_start": study.start_at.isoformat() if study.start_at else None,
+                "period_end": study.end_at.isoformat() if study.end_at else None,
+                "instrument_name": study.instrument_name,
+                "instrument_version_code": study.instrument_version_code,
             },
             "generated_at": datetime.now(UTC).isoformat(),
             "report_mode": report_mode,
             "sections": sections or [],
             "methodological_status": None,
+            "methodological_label": None,
+            "cover": None,
+            "sociolaboral_profile": [],
+            "dimension_results": [],
+            "subdimension_results": [],
+            "interpretation": [],
+            "priority_ranking": [],
+            "conclusions": [],
             "analysis_results": [],
             "censopas_results": [],
             "barem_results": None,
             "action_plans": [],
             "premium_analytics": None,
             "traceability": None,
+            "data_quality": None,
+            "executive_summary": None,
         }
 
         if analysis_run_id is not None:
@@ -347,9 +576,32 @@ class ReportService:
 
         censopas_service = CensopasScoringService(self.session)
         construct_results = await censopas_service.get_results(study.id)
-        bundle["censopas_results"] = [
-            censopas_service.apply_privacy(r, study.min_publishable_n) for r in construct_results
+        official_equivalence_enabled = await resolve_official_equivalence_enabled(
+            censopas_service.instrument_repo, study.instrument_version_id
+        )
+        barem = await censopas_service.repo.get_barem(study.barem_id) if study.barem_id else None
+        # Fase 1/7 (harness §31): única autoridad para "oficial"/"referencia" —
+        # nunca inferir localmente, siempre censopas_methodology.py.
+        bundle["methodological_label"] = resolve_censopas_methodological_status(
+            barem, official_equivalence_enabled
+        )
+        censopas_payload = [
+            censopas_service.apply_privacy(
+                r,
+                study.min_publishable_n,
+                barem=barem,
+                official_equivalence_enabled=official_equivalence_enabled,
+            )
+            for r in construct_results
         ]
+        bundle["censopas_results"] = censopas_service.attach_priority_ranks(censopas_payload)
+
+        telemetry = await TelemetryService(self.session).get_study_telemetry(study.id)
+        bundle["data_quality"] = telemetry.model_dump(mode="json")
+        bundle["executive_summary"] = self._build_executive_summary(
+            bundle["censopas_results"], bundle["data_quality"], bundle["methodological_label"]
+        )
+
         if study.instrument_version_id is not None:
             readiness = await censopas_service.get_readiness(study.instrument_version_id)
             bundle["methodological_status"] = readiness
@@ -361,12 +613,241 @@ class ReportService:
             overview = await ScoringService(self.session).get_overview(study.id)
             bundle["barem_results"] = overview.model_dump(mode="json")
 
+        # Fase 4/5: D1-D6 y S1-S20 se construyen desde `censopas_results`
+        # (trichotomy favorable/intermedio/desfavorable + clasificación
+        # colectiva + priority_rank ya agrupado por construct_type en
+        # `attach_priority_ranks`) — es la MISMA fuente que ya usaba el PDF,
+        # y la que trae exactamente los campos que pide la tabla CENSOPAS
+        # (antes el DOCX usaba `barem_results`, una fuente distinta con
+        # bandas/media/mediana pero sin trichotomy — esa divergencia era
+        # el origen de GAP-REPORT-PDF-PARITY). `barem_results` se conserva
+        # en el bundle para compatibilidad JSON (media/mediana), pero deja
+        # de ser la fuente de las secciones D1-D6/S1-S20/interpretación.
+        bundle["dimension_results"] = [
+            r for r in bundle["censopas_results"] if r.get("construct_type") == _DIMENSION_TYPE
+        ]
+        bundle["subdimension_results"] = [
+            r for r in bundle["censopas_results"] if r.get("construct_type") == _SUBDIMENSION_TYPE
+        ]
+
+        bundle["sociolaboral_profile"] = await self._build_sociolaboral_profile(study)
         bundle["action_plans"] = await self._build_action_plans(study.id)
+        bundle["priority_ranking"] = self._build_priority_ranking(bundle["dimension_results"])
+        bundle["interpretation"] = self._build_interpretation(
+            bundle["dimension_results"], bundle["action_plans"]
+        )
         bundle["premium_analytics"] = self._build_premium_analytics(
             bundle["analysis_results"], study.min_publishable_n
         )
-        bundle["traceability"] = await self._build_traceability(study, bundle)
+        bundle["cover"] = await self._build_cover(study, bundle, report_run)
+        bundle["traceability"] = await self._build_traceability(
+            study, bundle, report_run, analysis_run_id
+        )
+        bundle["conclusions"] = self._build_conclusions(bundle)
         return bundle
+
+    async def _build_cover(self, study, bundle: dict, report_run) -> dict:
+        organization_name = None
+        project = await self.session.get(Project, study.project_id)
+        if project is not None and project.organization_id is not None:
+            organization = await self.session.get(Organization, project.organization_id)
+            organization_name = organization.name if organization else None
+
+        evaluator_label = None
+        requested_by_user_id = getattr(report_run, "requested_by_user_id", None)
+        if requested_by_user_id is not None:
+            user = await self.session.get(User, requested_by_user_id)
+            if user is not None:
+                full_name = " ".join(filter(None, (user.first_name, user.last_name))).strip()
+                evaluator_label = full_name or user.username or user.email
+
+        readiness = bundle.get("methodological_status") or {}
+        return {
+            "organization_name": organization_name,
+            "study_code": bundle["study"]["code"],
+            "period_start": bundle["study"]["period_start"],
+            "period_end": bundle["study"]["period_end"],
+            "instrument_label": "CENSOPAS-COPSOQ",
+            "version_kind": readiness.get("version_kind", "UNKNOWN"),
+            "generated_at": bundle["generated_at"],
+            "evaluator_label": evaluator_label,
+            "confidentiality_notice": _CONFIDENTIALITY_NOTICE,
+            "methodological_label": bundle["methodological_label"],
+        }
+
+    async def _build_sociolaboral_profile(self, study) -> list[dict]:
+        """Fase 3: perfil sociolaboral (11 variables C-001..C-011, EXOGENOUS,
+        nunca puntuables — harness §9). Reusa `ResponseDescriptiveService`
+        (misma fuente que Resultados) y aplica supresión n<min_publishable_n
+        por categoría aquí mismo, porque ese servicio no suprime por diseño
+        (sirve también a vistas internas con otro umbral de exposición)."""
+        try:
+            descriptives = await ResponseDescriptiveService(self.session).get(study.id)
+        except NotFoundError:
+            return []
+
+        profile = []
+        for question in descriptives.questions:
+            if question.research_role != "EXOGENOUS" or question.is_scored:
+                continue
+            categories = []
+            for frequency in question.frequencies:
+                suppressed = frequency.n < descriptives.min_publishable_n
+                categories.append(
+                    {
+                        "label": frequency.label,
+                        "n": None if suppressed else frequency.n,
+                        "percentage": None if suppressed else frequency.percentage,
+                        "suppressed": suppressed,
+                    }
+                )
+            profile.append(
+                {
+                    "code": question.code,
+                    "label": question.short_label or question.question_text,
+                    "valid_n": question.valid_n,
+                    "missing_n": question.missing_n,
+                    "categories": categories,
+                }
+            )
+        return profile
+
+    @staticmethod
+    def _build_priority_ranking(dimension_results: list[dict]) -> list[dict]:
+        """Fase 7: reusa `priority_rank`/`unfavorable_pct` ya calculados por
+        `CensopasScoringService.attach_priority_ranks` — no reordena con una
+        regla nueva. El orden es una ayuda de priorización preventiva, nunca
+        una clasificación oficial adicional (se deja explícito en el render)."""
+        ranked = sorted(
+            (r for r in dimension_results if not r.get("suppressed")),
+            key=lambda r: (r.get("priority_rank") if r.get("priority_rank") is not None else 9999),
+        )
+        return [
+            {
+                "construct_code": r.get("construct_code"),
+                "construct_name": r.get("construct_name"),
+                "priority_rank": r.get("priority_rank"),
+                "n_valid": r.get("n_valid"),
+                "unfavorable_pct": r.get("unfavorable_pct"),
+                "collective_classification": r.get("collective_classification"),
+            }
+            for r in ranked
+        ]
+
+    @staticmethod
+    def _build_interpretation(dimension_results: list[dict], action_plans: list[dict]) -> list[dict]:
+        """Fase 6: separa hallazgo / clasificación / prioridad / hipótesis a
+        contrastar / orientación preventiva / limitación — nunca causalidad,
+        nunca diagnóstico individual. La hipótesis y la orientación vienen de
+        `ActionPlanItem.origin_hypothesis`/`action_description` cuando existe
+        una acción vinculada al mismo constructo; si no hay acción registrada
+        se deja constancia explícita de que aún no se contrastó."""
+        hypotheses_by_construct: dict[str, list[str]] = {}
+        actions_by_construct: dict[str, list[str]] = {}
+        for plan in action_plans:
+            for item in plan.get("items") or []:
+                code = item.get("construct_code")
+                if not code:
+                    continue
+                if item.get("origin_hypothesis"):
+                    hypotheses_by_construct.setdefault(code, []).append(item["origin_hypothesis"])
+                if item.get("action_description"):
+                    actions_by_construct.setdefault(code, []).append(item["action_description"])
+
+        entries = []
+        for result in dimension_results:
+            code = result.get("construct_code")
+            name = result.get("construct_name") or code or "—"
+            if result.get("suppressed"):
+                entries.append(
+                    {
+                        "construct_code": code,
+                        "construct_name": name,
+                        "finding": "Resultado suprimido por privacidad (n por debajo del mínimo publicable).",
+                        "classification": None,
+                        "priority_rank": None,
+                        "origin_hypothesis": [],
+                        "preventive_orientation": [],
+                        "limitation": "No es posible interpretar un resultado suprimido sin exponer el grupo.",
+                    }
+                )
+                continue
+            classification = result.get("collective_classification")
+            entries.append(
+                {
+                    "construct_code": code,
+                    "construct_name": name,
+                    "finding": (
+                        f"Se observó una distribución colectiva en {name} "
+                        f"(n={result.get('n_valid', '—')})."
+                    ),
+                    "classification": classification,
+                    "priority_rank": result.get("priority_rank"),
+                    "origin_hypothesis": hypotheses_by_construct.get(code, []),
+                    "preventive_orientation": actions_by_construct.get(code, [])
+                    or [
+                        "El Grupo de Trabajo deberá contrastar hipótesis de origen y definir "
+                        "medidas preventivas para esta dimensión."
+                    ],
+                    "limitation": (
+                        "El resultado describe una exposición colectiva; no permite diagnóstico "
+                        "individual. La hipótesis de origen es algo a contrastar, no una causa "
+                        "demostrada."
+                    ),
+                }
+            )
+        return entries
+
+    def _build_conclusions(self, bundle: dict) -> list[str]:
+        """Fase 9: solo texto derivado de datos ya calculados en el bundle —
+        ningún resultado concreto queda hardcodeado, se lee de
+        `executive_summary`/`dimension_results`/`methodological_label`."""
+        conclusions: list[str] = []
+        summary = bundle.get("executive_summary") or {}
+        priority_dimensions = summary.get("priority_dimensions") or []
+        if priority_dimensions:
+            names = ", ".join(
+                d.get("construct_name") or d.get("construct_code") or "—"
+                for d in priority_dimensions
+            )
+            conclusions.append(f"Las dimensiones prioritarias para intervención preventiva fueron: {names}.")
+        else:
+            conclusions.append(
+                "No se identificaron dimensiones con prioridad de intervención alta en esta medición."
+            )
+
+        protective = [
+            r
+            for r in bundle.get("dimension_results") or []
+            if not r.get("suppressed")
+            and r.get("collective_classification") == "FACTOR_PROTECTOR"
+        ]
+        if protective:
+            names = ", ".join(r.get("construct_name") or r.get("construct_code") or "—" for r in protective)
+            conclusions.append(f"Se identificaron factores protectores en: {names}.")
+        else:
+            conclusions.append("No se identificaron factores protectores destacados en esta medición.")
+
+        conclusions.append(
+            "Los resultados son de carácter colectivo — describen a un grupo de trabajadores, "
+            "no a personas individuales, y no constituyen diagnóstico clínico."
+        )
+
+        label = bundle.get("methodological_label") or {}
+        barem = (bundle.get("traceability") or {}).get("barem") or {}
+        if not label.get("official_equivalence"):
+            conclusions.append(
+                "Resultado basado en baremo de referencia. No equivalente al resultado oficial "
+                "CENSOPAS-COPSOQ."
+            )
+        conclusions.append(
+            "Se recomienda conservar la versión del instrumento"
+            + (f" ({bundle['study'].get('instrument_version_code')})" if bundle.get("study", {}).get("instrument_version_code") else "")
+            + " y el baremo aplicado"
+            + (f" ({barem.get('name')} · versión {barem.get('version')})" if barem.get("name") else "")
+            + " para permitir comparaciones futuras."
+        )
+        return conclusions
 
     async def _build_action_plans(self, study_id: int) -> list[dict]:
         stmt = (
@@ -439,19 +920,27 @@ class ReportService:
                                 if latest
                                 else None
                             ),
+                            "current_value": (
+                                float(latest.numeric_value)
+                                if latest and latest.numeric_value is not None
+                                else None
+                            ),
                         }
                     )
                 items.append(
                     {
                         "construct_code": construct.code if construct else None,
                         "construct_name": construct.name if construct else None,
+                        "analysis_run_id": item.analysis_run_id,
                         "title": item.title,
                         "finding": item.finding,
+                        "origin_hypothesis": item.origin_hypothesis,
                         "action_description": item.action_description,
                         "responsible_label": item.responsible_label,
                         "priority": item.priority,
                         "due_date": item.due_date.isoformat() if item.due_date else None,
                         "status": item.status,
+                        "effective_status": compute_effective_status(item.status, item.due_date),
                         "kpis": kpis,
                     }
                 )
@@ -470,6 +959,51 @@ class ReportService:
 
 
     
+    @staticmethod
+    def _build_executive_summary(
+        censopas_results: list[dict],
+        data_quality: dict | None,
+        methodological_label: dict | None = None,
+    ) -> dict:
+        """Guía y modelos de reporte §31: primer contenido sustantivo del
+        informe — participación, niveles principales, prioridades. Se deriva
+        de `censopas_results` (ya con privacidad aplicada) y `data_quality`;
+        no ejecuta cálculo nuevo."""
+        publishable = [
+            result
+            for result in censopas_results
+            if not result.get("suppressed") and result.get("unfavorable_pct") is not None
+        ]
+        ranked = sorted(publishable, key=lambda result: result["unfavorable_pct"], reverse=True)
+        high_risk_count = sum(
+            1 for result in ranked if result.get("collective_classification") == "RIESGO_ALTO"
+        )
+        if ranked:
+            headline = (
+                f"{high_risk_count} de {len(ranked)} dimensiones en riesgo alto (≥50% desfavorable)."
+                if high_risk_count
+                else "Ninguna dimensión alcanza el umbral de riesgo alto (≥50% desfavorable)."
+            )
+        else:
+            headline = "Todavía no hay dimensiones con resultados publicables para este estudio."
+
+        return {
+            "n_valid": (data_quality or {}).get("valid_count"),
+            "completion_rate": (data_quality or {}).get("completion_rate"),
+            "headline": headline,
+            "barem_status": (methodological_label or {}).get("barem_status"),
+            "official_equivalence": (methodological_label or {}).get("official_equivalence"),
+            "priority_dimensions": [
+                {
+                    "construct_code": result.get("construct_code"),
+                    "construct_name": result.get("construct_name"),
+                    "unfavorable_pct": result.get("unfavorable_pct"),
+                    "classification": result.get("collective_classification"),
+                }
+                for result in ranked[:3]
+            ],
+        }
+
     @staticmethod
     def _build_premium_analytics(
         analysis_results: list[dict], min_publishable_n: int
@@ -529,7 +1063,9 @@ class ReportService:
             "results": results[:100],
         }
 
-    async def _build_traceability(self, study, bundle: dict) -> dict:
+    async def _build_traceability(
+        self, study, bundle: dict, report_run=None, requested_analysis_run_id: int | None = None
+    ) -> dict:
         runs_stmt = (
             select(AnalysisRun)
             .where(AnalysisRun.study_id == study.id)
@@ -541,6 +1077,7 @@ class ReportService:
             barem = await self.session.get(Barem, study.barem_id)
             if barem is not None:
                 barem_payload = {
+                    "id": barem.id,
                     "name": barem.name,
                     "version": barem.barem_version,
                     "type": barem.metadata_.get("barem_type"),
@@ -549,7 +1086,16 @@ class ReportService:
                     "status": barem.status,
                 }
         readiness = bundle.get("methodological_status") or {}
+        methodological_label = bundle.get("methodological_label") or {}
+        data_quality = bundle.get("data_quality") or {}
         return {
+            "report_run_id": getattr(report_run, "id", None),
+            "report_run_public_id": (
+                str(report_run.public_id) if getattr(report_run, "public_id", None) else None
+            ),
+            "study_id": study.id,
+            "study_code": bundle.get("study", {}).get("code"),
+            "analysis_run_id": requested_analysis_run_id,
             "lineage": [
                 "responses.raw_code",
                 "response_scores.risk_value",
@@ -567,6 +1113,16 @@ class ReportService:
                 )
             ),
             "barem": barem_payload,
+            "official_equivalence": methodological_label.get("official_equivalence"),
+            "exclusions": {
+                "excluded_count": data_quality.get("excluded_count"),
+                "abandoned_count": data_quality.get("abandoned_count"),
+                "review_count": data_quality.get("review_count"),
+                "criteria": (
+                    "Sesiones sin estado COMPLETED/validation_status=VALID quedan fuera de "
+                    "`n_valid`; el detalle agregado está en Calidad de datos."
+                ),
+            },
             "analysis_runs": [
                 {
                     "analysis_type": run.analysis_type,

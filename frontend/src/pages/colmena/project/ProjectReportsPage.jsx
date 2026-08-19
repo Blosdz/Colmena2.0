@@ -26,8 +26,9 @@ import { displayLabel } from '../../../utils/labels.js';
 
 const SECTIONS = [
   { key: 'portada', label: 'Portada' },
+  { key: 'resumen_ejecutivo', label: 'Resumen ejecutivo' },
   { key: 'ficha_tecnica', label: 'Ficha técnica' },
-  { key: 'participacion_privacidad', label: 'Participación y privacidad' },
+  { key: 'calidad_datos', label: 'Calidad de datos (participación)' },
   { key: 'resultados_globales', label: 'Resultados globales' },
   { key: 'dimensiones', label: 'Dimensiones' },
   { key: 'subdimensiones', label: 'Subdimensiones' },

@@ -1,6 +1,11 @@
 import pytest
 
-from app.analytics.censopas.classification import classify_collective_result, classify_construct_score
+from app.analytics.censopas.classification import (
+    classify_collective_result,
+    classify_construct_score,
+    cutoff_to_bands,
+    summarize_trichotomy,
+)
 from app.analytics.censopas.scoring import (
     aggregate_construct_score,
     apply_direction,
@@ -72,3 +77,38 @@ def test_classification_includes_exact_cutoff_boundaries() -> None:
 )
 def test_classify_collective_result(fav, inter, unfav, expected) -> None:
     assert classify_collective_result(fav, inter, unfav) == expected
+
+
+def test_cutoff_to_bands_lower_better_codes_are_language_stable() -> None:
+    bands = cutoff_to_bands(33, 66, "LOWER_BETTER", "Favorable", "Intermedio", "Desfavorable")
+    by_code = {band["code"]: band for band in bands}
+    assert set(by_code) == {"FAVORABLE", "INTERMEDIATE", "UNFAVORABLE"}
+    assert by_code["FAVORABLE"]["min_value"] == 0.0
+    assert by_code["FAVORABLE"]["max_value"] == 33.0
+    assert by_code["UNFAVORABLE"]["min_value"] == 66.0
+    assert by_code["UNFAVORABLE"]["max_value"] == 100.0
+    # classification_code nunca depende del idioma/texto del label visible.
+    assert by_code["UNFAVORABLE"]["label"] == "Desfavorable"
+    assert all(band["classification_code"] == band["code"] for band in bands)
+
+
+def test_cutoff_to_bands_higher_better_flips_ranges() -> None:
+    bands = cutoff_to_bands(33, 66, "HIGHER_BETTER", "Favorable", "Intermedio", "Desfavorable")
+    by_code = {band["code"]: band for band in bands}
+    assert by_code["UNFAVORABLE"]["min_value"] == 0.0
+    assert by_code["FAVORABLE"]["max_value"] == 100.0
+
+
+def test_summarize_trichotomy_empty() -> None:
+    summary = summarize_trichotomy([])
+    assert summary["n_valid"] == 0
+    assert summary["classification"] is None
+
+
+def test_summarize_trichotomy_computes_collective_classification() -> None:
+    values = [(10.0, "UNFAVORABLE")] * 8 + [(50.0, "INTERMEDIATE")] * 1 + [(90.0, "FAVORABLE")] * 1
+    summary = summarize_trichotomy(values)
+    assert summary["n_valid"] == 10
+    assert summary["unfavorable_n"] == 8
+    assert summary["unfavorable_pct"] == 80.0
+    assert summary["classification"] == "RIESGO_ALTO"

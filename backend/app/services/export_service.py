@@ -48,6 +48,13 @@ class ExportService:
             raise NotFoundError(f"Exportación {export_id} no encontrada")
         return export
 
+    async def list_exports(self, study_id: int) -> list[Export]:
+        """Trazabilidad de exportaciones (harness §73): historial por estudio."""
+        study = await self.study_repo.get(study_id)
+        if study is None:
+            raise NotFoundError(f"Estudio {study_id} no encontrado")
+        return await self.repo.list_by_study(study_id)
+
     async def create_export(self, study_id: int, payload: ExportCreate) -> Export:
         study = await self.study_repo.get(study_id)
         if study is None:

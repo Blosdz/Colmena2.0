@@ -1,6 +1,6 @@
 import { apiRequest } from './client.js';
 
-export function registerUser({ email, username, password, firstName, lastName }) {
+export function registerUser({ email, username, password, firstName, lastName, organizationName, legalName, taxId, organizationType }) {
   return apiRequest('/auth/register', {
     method: 'POST',
     skipAuth: true,
@@ -10,6 +10,14 @@ export function registerUser({ email, username, password, firstName, lastName })
       password,
       first_name: firstName || null,
       last_name: lastName || null,
+      organization: organizationName
+        ? {
+            name: organizationName,
+            legal_name: legalName || null,
+            tax_id: taxId || null,
+            organization_type: organizationType || null,
+          }
+        : null,
     },
   });
 }

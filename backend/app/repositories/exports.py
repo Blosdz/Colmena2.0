@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.export import Export
@@ -16,3 +17,11 @@ class ExportRepository:
         self.session.add(export)
         await self.session.flush()
         return export
+
+    async def list_by_study(self, study_id: int) -> list[Export]:
+        stmt = (
+            select(Export)
+            .where(Export.study_id == study_id)
+            .order_by(Export.created_at.desc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())

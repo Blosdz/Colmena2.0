@@ -16,6 +16,7 @@ class ResultBandCount(BaseModel):
     band_id: int | None
     code: str
     label: str
+    classification_code: str | None = None
     color_hint: str | None
     n: int | None
     pct: float | None
@@ -48,6 +49,8 @@ class StudyResultsOverview(BaseModel):
     instrument_version_id: int | None
     barem_id: int | None
     barem_name: str | None
+    barem_status: str | None = None
+    official_equivalence: bool = False
     n_completed: int
     min_publishable_n: int
     results: list[ConstructBaremResult] = Field(default_factory=list)

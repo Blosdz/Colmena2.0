@@ -4,12 +4,7 @@ import { Pause, Play, RefreshCcw } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 
 import { getProject } from '../../../api/projects.js';
-import {
-  getResponseDescriptives,
-  getResultsOverview,
-  getWideDataset,
-  listStudies,
-} from '../../../api/studies.js';
+import { getResponseDescriptives, listStudies } from '../../../api/studies.js';
 import { getProjectTelemetry } from '../../../api/telemetry.js';
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
 import { displayLabel } from '../../../utils/labels.js';
@@ -21,17 +16,7 @@ import { EmptyState } from '../../../components/ui/EmptyState.jsx';
 import { ErrorState } from '../../../components/ui/ErrorState.jsx';
 import { LoadingState } from '../../../components/ui/LoadingState.jsx';
 import { ProjectMissingState } from '../../../components/colmena/ProjectMissingState.jsx';
-import ResponseDistributionsTab from '../../../components/colmena/telemetry/ResponseDistributionsTab.jsx';
-import ResponseMatrixTab from '../../../components/colmena/telemetry/ResponseMatrixTab.jsx';
-import TelemetryComparisonsTab from '../../../components/colmena/telemetry/TelemetryComparisonsTab.jsx';
-import TelemetrySummaryTab from '../../../components/colmena/telemetry/TelemetrySummaryTab.jsx';
-
-const TABS = [
-  { key: 'summary', label: 'Resumen' },
-  { key: 'distributions', label: 'Distribuciones' },
-  { key: 'comparisons', label: 'Comparaciones' },
-  { key: 'responses', label: 'Base de respuestas' },
-];
+import TelemetryDashboard from '../../../components/colmena/telemetry/TelemetryDashboard.jsx';
 
 function usePageVisibility() {
   const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
@@ -43,10 +28,16 @@ function usePageVisibility() {
   return visible;
 }
 
+/**
+ * Telemetría: participación y calidad de captura de las aplicaciones del
+ * instrumento, con gráficos (embudo, estado de sesiones, evolución,
+ * calidad de captura) y las preguntas con sus respuestas, agrupadas por
+ * dimensión. La analítica avanzada (riesgo, segmentación, relaciones)
+ * vive en Resultados, no aquí.
+ */
 export default function AdaptiveProjectTelemetryPage() {
   const { projectId } = useParams();
   useActiveProject(projectId);
-  const [tab, setTab] = useState('summary');
   const [studyId, setStudyId] = useState(null);
   const [paused, setPaused] = useState(false);
   const pageVisible = usePageVisibility();
@@ -77,6 +68,8 @@ export default function AdaptiveProjectTelemetryPage() {
     refetchInterval,
     refetchIntervalInBackground: false,
   });
+  // Alimenta tanto el resumen de faltantes (summary.missing_pct/missing_cells)
+  // como el desglose por pregunta de la sección Distribuciones más abajo.
   const descriptivesQuery = useQuery({
     queryKey: ['responseDescriptives', studyId],
     queryFn: () => getResponseDescriptives(studyId),
@@ -84,32 +77,14 @@ export default function AdaptiveProjectTelemetryPage() {
     refetchInterval,
     refetchIntervalInBackground: false,
   });
-  const overviewQuery = useQuery({
-    queryKey: ['resultsOverview', studyId],
-    queryFn: () => getResultsOverview(studyId),
-    enabled: Boolean(studyId),
-    refetchInterval,
-    refetchIntervalInBackground: false,
-  });
-  const datasetQuery = useQuery({
-    queryKey: ['wideDataset', studyId],
-    queryFn: () => getWideDataset(studyId),
-    enabled: Boolean(studyId) && tab === 'responses',
-    refetchInterval: tab === 'responses' ? refetchInterval : false,
-    refetchIntervalInBackground: false,
-  });
 
   const selectedTelemetry = (telemetryQuery.data?.studies || []).find((study) => study.study_id === studyId);
-  const isRefreshing = telemetryQuery.isFetching || descriptivesQuery.isFetching || overviewQuery.isFetching || datasetQuery.isFetching;
-  const hasDataError = telemetryQuery.isError || descriptivesQuery.isError || overviewQuery.isError || datasetQuery.isError;
+  const isRefreshing = telemetryQuery.isFetching || descriptivesQuery.isFetching;
+  const hasDataError = telemetryQuery.isError || descriptivesQuery.isError;
 
   const refresh = () => {
     telemetryQuery.refetch();
-    if (studyId) {
-      descriptivesQuery.refetch();
-      overviewQuery.refetch();
-      if (tab === 'responses') datasetQuery.refetch();
-    }
+    if (studyId) descriptivesQuery.refetch();
   };
 
   if (projectQuery.isLoading) return <LoadingState label="Cargando proyecto…" />;
@@ -120,7 +95,7 @@ export default function AdaptiveProjectTelemetryPage() {
       <PageHeader
         eyebrow="Telemetría"
         title={projectQuery.data.name}
-        description="Participación, distribuciones, comparaciones y respuestas válidas en un solo dashboard."
+        description="Participación y calidad de captura: cómo avanza la recolección y qué tan confiables son los datos que llegan."
         actions={(
           <>
             <Button onClick={() => setPaused((value) => !value)} size="sm" type="button" variant="secondary">
@@ -155,23 +130,10 @@ export default function AdaptiveProjectTelemetryPage() {
         </div>
       </Card>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-border/70 pb-px">
-        {TABS.map((item) => (
-          <button
-            key={item.key}
-            className={`colmena-pill-tab shrink-0 ${tab === item.key ? 'active' : ''}`}
-            onClick={() => setTab(item.key)}
-            type="button"
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
       {hasDataError ? (
         <ErrorState
           message="Conservamos la última información disponible. Usa Actualizar para volver a intentar."
-          title="No se pudo actualizar todo el dashboard"
+          title="No se pudo actualizar la telemetría"
         />
       ) : null}
 
@@ -181,32 +143,12 @@ export default function AdaptiveProjectTelemetryPage() {
         </Card>
       ) : null}
 
-      {studyId && tab === 'summary' ? (
-        <TelemetrySummaryTab
-          isLoading={telemetryQuery.isLoading}
-          overview={overviewQuery.data}
+      {studyId ? (
+        <TelemetryDashboard
+          descriptives={descriptivesQuery.data}
+          isLoadingTelemetry={telemetryQuery.isLoading}
+          studyId={studyId}
           telemetry={selectedTelemetry}
-        />
-      ) : null}
-      {studyId && tab === 'distributions' ? (
-        <ResponseDistributionsTab
-          descriptives={descriptivesQuery.data}
-          isLoading={descriptivesQuery.isLoading}
-        />
-      ) : null}
-      {studyId && tab === 'comparisons' ? (
-        <TelemetryComparisonsTab
-          descriptives={descriptivesQuery.data}
-          overview={overviewQuery.data}
-          studyId={studyId}
-        />
-      ) : null}
-      {studyId && tab === 'responses' ? (
-        <ResponseMatrixTab
-          dataset={datasetQuery.data}
-          descriptives={descriptivesQuery.data}
-          isLoading={datasetQuery.isLoading}
-          studyId={studyId}
         />
       ) : null}
     </div>

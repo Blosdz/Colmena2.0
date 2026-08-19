@@ -7,6 +7,7 @@ from app.core.pagination import Page, PageParams, paginate
 from app.models.project import Project
 from app.repositories.projects import ProjectRepository
 from app.schemas.projects import ProjectCreate, ProjectRead, ProjectUpdate
+from app.services.censopas_provisioning_service import CensopasProvisioningService
 
 
 class ProjectService:
@@ -15,22 +16,35 @@ class ProjectService:
         self.repo = ProjectRepository(session)
 
     async def create(self, payload: ProjectCreate) -> Project:
-        project = Project(
-            owner_user_id=payload.owner_user_id,
-            organization_id=payload.organization_id,
-            name=payload.name,
-            project_type=payload.project_type,
-            description=payload.description,
-            metadata_=payload.metadata,
-        )
-        project = await self.repo.create(project)
-        await self.session.commit()
-        return project
+        try:
+            project = Project(
+                owner_user_id=payload.owner_user_id,
+                organization_id=payload.organization_id,
+                name=payload.name,
+                project_type=payload.project_type,
+                description=payload.description,
+                metadata_=payload.metadata,
+            )
+            project = await self.repo.create(project)
+            if project.project_type == "CENSO":
+                await CensopasProvisioningService(self.session).provision_project(project)
+            await self.session.commit()
+            await self.session.refresh(project)
+            return project
+        except Exception:
+            await self.session.rollback()
+            raise
 
     async def get(self, project_id: int) -> Project:
         project = await self.repo.get(project_id)
         if project is None:
             raise NotFoundError(f"Proyecto {project_id} no encontrado")
+        # Repara proyectos CensoPÁS creados por una instancia anterior del
+        # backend antes de activar el aprovisionamiento automático.
+        if project.project_type == "CENSO" and not (project.metadata_ or {}).get("censopas_auto_provisioned"):
+            await CensopasProvisioningService(self.session).provision_project(project)
+            await self.session.commit()
+            await self.session.refresh(project)
         return project
 
     async def list(self, params: PageParams) -> Page[ProjectRead]:

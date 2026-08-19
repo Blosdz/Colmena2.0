@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError
+from app.core.action_plan_status import latest_measurement
+from app.core.exceptions import NotFoundError, ValidationDomainError
+from app.models.analysis import AnalysisRun
 from app.models.bsc import ActionPlan, ActionPlanItem, Kpi, KpiMeasurement
 from app.repositories.bsc import BscRepository
 from app.repositories.studies import StudyRepository
@@ -19,6 +21,15 @@ from app.schemas.bsc import (
     KpiCreate,
     KpiMeasurementCreate,
 )
+
+
+def _attach_current_value(kpi: Kpi) -> Kpi:
+    latest = latest_measurement(kpi.measurements)
+    kpi.current_value = (
+        float(latest.numeric_value) if latest and latest.numeric_value is not None else None
+    )
+    kpi.current_measurement_at = latest.measured_at if latest else None
+    return kpi
 
 
 class BscService:
@@ -46,12 +57,22 @@ class BscService:
         return plan
 
     async def add_item(self, action_plan_id: int, payload: ActionPlanItemCreate) -> ActionPlanItem:
-        await self.get_action_plan(action_plan_id)
+        plan = await self.get_action_plan(action_plan_id)
+        if payload.analysis_run_id is not None:
+            run = await self.session.get(AnalysisRun, payload.analysis_run_id)
+            if run is None:
+                raise NotFoundError(f"AnalysisRun {payload.analysis_run_id} no encontrado")
+            if run.study_id != plan.study_id:
+                raise ValidationDomainError(
+                    "El AnalysisRun referenciado pertenece a otro estudio distinto del plan."
+                )
         item = ActionPlanItem(
             action_plan_id=action_plan_id,
             construct_id=payload.construct_id,
+            analysis_run_id=payload.analysis_run_id,
             title=payload.title,
             finding=payload.finding,
+            origin_hypothesis=payload.origin_hypothesis,
             action_description=payload.action_description,
             responsible_user_id=payload.responsible_user_id,
             responsible_label=payload.responsible_label,
@@ -95,10 +116,15 @@ class BscService:
         )
         kpi = await self.repo.add_kpi(kpi)
         await self.session.commit()
+        # KPI recién creado: nunca tiene mediciones todavía, evita el lazy-load
+        # de `measurements` (dispara MissingGreenlet fuera de un contexto async).
+        kpi.current_value = None
+        kpi.current_measurement_at = None
         return kpi
 
     async def list_kpis(self, study_id: int) -> list[Kpi]:
-        return await self.repo.list_kpis(study_id)
+        kpis = await self.repo.list_kpis(study_id)
+        return [_attach_current_value(kpi) for kpi in kpis]
 
     async def add_measurement(self, kpi_id: int, payload: KpiMeasurementCreate) -> KpiMeasurement:
         kpi = await self.repo.get_kpi(kpi_id)

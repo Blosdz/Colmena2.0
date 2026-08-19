@@ -20,6 +20,7 @@ from app.schemas.scoring import ScoreRunSummary, StudyResultsOverview
 from app.services.dataset_service import DatasetService
 from app.services.invitation_service import InvitationService
 from app.services.study_service import StudyService
+from app.services.scoring_orchestrator import run_canonical_scoring
 from app.services.scoring_service import ScoringService
 
 router = APIRouter(tags=["studies"])
@@ -130,8 +131,7 @@ async def archive_study(study_id: int, session: AsyncSession = Depends(get_db)):
 
 @router.post("/studies/{study_id}/scoring", response_model=ScoreRunSummary)
 async def run_study_scoring(study_id: int, session: AsyncSession = Depends(get_db)):
-    service = ScoringService(session)
-    _run, summary = await service.run(study_id)
+    _run, summary = await run_canonical_scoring(session, study_id)
     return summary
 
 

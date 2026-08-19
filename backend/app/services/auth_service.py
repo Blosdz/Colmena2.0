@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthenticationError, ConflictError
 from app.core.security import create_access_token, hash_password, verify_password
-from app.models.user import User
+from app.models.user import Organization, OrganizationMembership, User
 from app.schemas.auth import LoginRequest, RegisterRequest
 
 
@@ -29,6 +29,31 @@ class AuthService:
             status="ACTIVE",
         )
         self.session.add(user)
+        await self.session.flush()
+
+        # La empresa es opcional en el registro (un usuario puede sumarse a una
+        # organización existente después); si viene, queda creada de una vez
+        # con el usuario como dueño — es el flujo "la empresa ingresa sus
+        # datos" del alta de cuenta.
+        if payload.organization is not None:
+            organization = Organization(
+                name=payload.organization.name,
+                legal_name=payload.organization.legal_name,
+                tax_id=payload.organization.tax_id,
+                organization_type=payload.organization.organization_type,
+                status="ACTIVE",
+            )
+            self.session.add(organization)
+            await self.session.flush()
+            self.session.add(
+                OrganizationMembership(
+                    organization_id=organization.id,
+                    user_id=user.id,
+                    role_code="OWNER",
+                    permissions={},
+                )
+            )
+
         await self.session.commit()
         await self.session.refresh(user)
         return user

@@ -4,7 +4,16 @@ import { ChevronDown, ChevronRight, FileQuestion, Layers3, Plus } from 'lucide-r
 import { Button } from '../../ui/Button.jsx';
 import { displayLabel } from '../../../utils/labels.js';
 
-function QuestionRow({ item, construct, onEditItem }) {
+function QuestionRow({ item, construct, onEditItem, readOnly }) {
+  if (readOnly) {
+    return (
+      <div className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-muted">
+        <FileQuestion size={14} className="shrink-0 text-muted/60" />
+        <span className="min-w-0 flex-1 truncate">{item.question_text}</span>
+        {item.code ? <span className="text-xs text-muted/70">({item.code})</span> : null}
+      </div>
+    );
+  }
   return (
     <button type="button" onClick={() => onEditItem(item, construct)}
       className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-[#F5F6F8]">
@@ -15,7 +24,7 @@ function QuestionRow({ item, construct, onEditItem }) {
   );
 }
 
-function DimensionNode({ construct, depth, onAddSubdimension, onAddItem, onEditItem }) {
+function DimensionNode({ construct, depth, onAddSubdimension, onAddItem, onEditItem, readOnly }) {
   const [expanded, setExpanded] = useState(true);
   const hasChildren = construct.subdimensions.length > 0 || construct.items.length > 0;
   const isDimension = construct.construct_type === 'DIMENSION';
@@ -32,25 +41,27 @@ function DimensionNode({ construct, depth, onAddSubdimension, onAddItem, onEditI
             {isDimension ? 'DIMENSIÓN' : 'SUBDIMENSIÓN'}
           </span>
         </button>
-        <div className="flex shrink-0 gap-2">
-          {isDimension ? (
-            <Button variant="secondary" size="sm" onClick={() => onAddSubdimension(construct)}>
-              <Plus size={13} /> Subdimensión
+        {readOnly ? null : (
+          <div className="flex shrink-0 gap-2">
+            {isDimension ? (
+              <Button variant="secondary" size="sm" onClick={() => onAddSubdimension(construct)}>
+                <Plus size={13} /> Subdimensión
+              </Button>
+            ) : null}
+            <Button variant="secondary" size="sm" onClick={() => onAddItem(construct)}>
+              <Plus size={13} /> Pregunta
             </Button>
-          ) : null}
-          <Button variant="secondary" size="sm" onClick={() => onAddItem(construct)}>
-            <Plus size={13} /> Pregunta
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
       {expanded ? (
         <div className="space-y-1 pb-2 pl-6">
           {construct.items.map((item) => (
-            <QuestionRow key={item.id} item={item} construct={construct} onEditItem={onEditItem} />
+            <QuestionRow key={item.id} item={item} construct={construct} onEditItem={onEditItem} readOnly={readOnly} />
           ))}
           {construct.subdimensions.map((child) => (
             <DimensionNode key={child.id} construct={child} depth={depth + 1}
-              onAddSubdimension={onAddSubdimension} onAddItem={onAddItem} onEditItem={onEditItem} />
+              onAddSubdimension={onAddSubdimension} onAddItem={onAddItem} onEditItem={onEditItem} readOnly={readOnly} />
           ))}
         </div>
       ) : null}
@@ -60,7 +71,7 @@ function DimensionNode({ construct, depth, onAddSubdimension, onAddItem, onEditI
 
 export default function InstrumentTreeView({
   tree, selectedVariableId, onSelectVariable, onAddVariable, onAddDimension,
-  onAddSubdimension, onAddItem, onEditItem,
+  onAddSubdimension, onAddItem, onEditItem, readOnly = false,
 }) {
   const variables = tree.variables || [];
   const selected = variables.find((variable) => variable.id === selectedVariableId) || null;
@@ -78,9 +89,11 @@ export default function InstrumentTreeView({
             ))}
           </select>
         </label>
-        <Button variant="secondary" size="md" onClick={onAddVariable}>
-          <Plus size={14} /> Nueva variable
-        </Button>
+        {readOnly ? null : (
+          <Button variant="secondary" size="md" onClick={onAddVariable}>
+            <Plus size={14} /> Nueva variable
+          </Button>
+        )}
       </div>
 
       {!selected ? (
@@ -88,7 +101,9 @@ export default function InstrumentTreeView({
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber/10 text-amber"><Layers3 size={19} /></div>
           <div><p className="text-sm font-semibold text-dark">Crea la primera variable</p>
             <p className="mt-1 text-xs text-muted">Después podrás agregar sus dimensiones y preguntas directas.</p></div>
-          <Button variant="primary" size="sm" onClick={onAddVariable}><Plus size={13} /> Nueva variable</Button>
+          {readOnly ? null : (
+            <Button variant="primary" size="sm" onClick={onAddVariable}><Plus size={13} /> Nueva variable</Button>
+          )}
         </div>
       ) : (
         <>
@@ -97,27 +112,29 @@ export default function InstrumentTreeView({
               <p className="text-sm font-semibold text-dark">{selected.name}</p>
               <p className="mt-0.5 text-xs text-muted">{selected.code} · {displayLabel(selected.role)}</p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => onAddDimension(selected)}>
-                <Plus size={13} /> Dimensión
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => onAddItem(selected)}>
-                <Plus size={13} /> Pregunta directa
-              </Button>
-            </div>
+            {readOnly ? null : (
+              <div className="flex gap-2">
+                <Button variant="secondary" size="sm" onClick={() => onAddDimension(selected)}>
+                  <Plus size={13} /> Dimensión
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => onAddItem(selected)}>
+                  <Plus size={13} /> Pregunta directa
+                </Button>
+              </div>
+            )}
           </div>
           <div className="px-4 py-3">
             {selected.direct_items.length ? (
               <section className="mb-3 rounded-xl border border-border bg-white p-2">
                 <p className="px-3 py-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Preguntas directas</p>
                 {selected.direct_items.map((item) => (
-                  <QuestionRow key={item.id} item={item} construct={selected} onEditItem={onEditItem} />
+                  <QuestionRow key={item.id} item={item} construct={selected} onEditItem={onEditItem} readOnly={readOnly} />
                 ))}
               </section>
             ) : null}
             {selected.dimensions.length ? selected.dimensions.map((dimension) => (
               <DimensionNode key={dimension.id} construct={dimension} depth={0}
-                onAddSubdimension={onAddSubdimension} onAddItem={onAddItem} onEditItem={onEditItem} />
+                onAddSubdimension={onAddSubdimension} onAddItem={onAddItem} onEditItem={onEditItem} readOnly={readOnly} />
             )) : !selected.direct_items.length ? (
               <p className="py-8 text-center text-sm text-muted">Agrega una dimensión o una pregunta directa.</p>
             ) : null}

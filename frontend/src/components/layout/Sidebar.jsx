@@ -1,10 +1,14 @@
 import {
   Archive,
   BarChart3,
+  BookOpen,
+  CalendarCheck,
   ChevronDown,
   ClipboardList,
   FileBarChart2,
   FolderKanban,
+  FileDown,
+  FlaskConical,
   Gauge,
   Home,
   LayoutDashboard,
@@ -82,11 +86,15 @@ export function Sidebar({ collapsed = false, onToggle }) {
   );
 
   const projectHref = hasProject ? `/colmena/project/${activeProjectId}` : '/colmena/project/new';
+  const instrumentsHref = hasProject ? `/colmena/project/${activeProjectId}/instruments` : '/colmena/project/new';
   const formHref = hasProject ? `/colmena/project/${activeProjectId}/form` : '/colmena/project/new';
   const telemetryHref = hasProject ? `/colmena/project/${activeProjectId}/telemetry` : '/colmena/project/new';
   const resultsHref = hasProject ? `/colmena/project/${activeProjectId}/results` : '/colmena/project/new';
   const premiumHref = hasProject ? `/colmena/project/${activeProjectId}/premium` : '/colmena/project/new';
+  const analyticsLabHref = hasProject ? `/colmena/project/${activeProjectId}/analytics-lab` : '/colmena/project/new';
+  const planHref = hasProject ? `/colmena/project/${activeProjectId}/plan` : '/colmena/project/new';
   const reportsHref = hasProject ? `/colmena/project/${activeProjectId}/reports` : '/colmena/project/new';
+  const exportsHref = hasProject ? `/colmena/project/${activeProjectId}/exports` : '/colmena/project/new';
 
   const navGroups = [
     {
@@ -105,6 +113,12 @@ export function Sidebar({ collapsed = false, onToggle }) {
       beforeItems: projectSelector,
       items: [
         {
+          to: instrumentsHref,
+          label: 'Instrumentos',
+          icon: BookOpen,
+          active: (p) => p.includes('/instruments'),
+        },
+        {
           to: projectHref,
           label: 'Constructor',
           icon: LayoutDashboard,
@@ -121,8 +135,16 @@ export function Sidebar({ collapsed = false, onToggle }) {
           active: (p) => p.includes('/telemetry') || p.includes('/link'),
         },
         { to: resultsHref, label: 'Resultados', icon: ClipboardList, active: (p) => p.includes('/results') },
-        { to: premiumHref, label: 'Tablero premium', icon: Gauge, active: (p) => p.includes('/premium') },
+        { to: premiumHref, label: 'Explorador', icon: Gauge, active: (p) => p.includes('/premium') },
+        {
+          to: analyticsLabHref,
+          label: 'Panel visual',
+          icon: FlaskConical,
+          active: (p) => p.includes('/analytics-lab'),
+        },
+        { to: planHref, label: 'Plan preventivo', icon: CalendarCheck, active: (p) => p.includes('/plan') },
         { to: reportsHref, label: 'Reportes', icon: FileBarChart2, active: (p) => p.includes('/reports') },
+        { to: exportsHref, label: 'Exportaciones', icon: FileDown, active: (p) => p.includes('/exports') },
       ],
     },
     {

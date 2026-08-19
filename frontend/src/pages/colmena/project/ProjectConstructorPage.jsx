@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, FolderKanban, Gauge, LayoutGrid, ListTree, Scale, UserRound } from 'lucide-react';
+import { ClipboardList, FolderKanban, Gauge, LayoutGrid, ListTree, LockKeyhole, Scale, UserRound } from 'lucide-react';
 
 import { useAuth } from '../../../auth/AuthContext.jsx';
 import { useActiveProject } from '../../../hooks/useActiveProject.js';
@@ -38,6 +38,13 @@ import BaremBuilder from '../../../components/colmena/instruments/BaremBuilder.j
 import ProjectCreateModal from '../../../components/colmena/projects/ProjectCreateModal.jsx';
 import ExogenousFieldsManager from '../../../components/colmena/variables/ExogenousFieldsManager.jsx';
 import CensopasReadinessPanel from '../../../components/colmena/instruments/CensopasReadinessPanel.jsx';
+
+const LOCK_MESSAGES = {
+  SYSTEM_INSTRUMENT_LOCKED:
+    'CENSOPAS-COPSOQ es un instrumento oficial protegido: dimensiones, preguntas y escalas Likert coinciden con el Manual técnico y no son editables. Los campos adaptables (nivel de instrucción, puesto, área, tipo de contrato, tiempo en el puesto, horario) se administran desde la pestaña Datos exógenos.',
+  STUDY_OPEN_STRUCTURAL_LOCK:
+    'El estudio de este proyecto ya está abierto y recolectando respuestas, así que su estructura quedó congelada.',
+};
 
 function collectConstructCodes(nodes, codes = new Set()) {
   nodes?.forEach((node) => {
@@ -85,6 +92,7 @@ function InstrumentTab({ projectId, versionId, isLoadingInstrument, onCreateInst
     queryFn: () => getInstrumentTree(versionId),
     enabled: Boolean(versionId) && view === 'tree',
   });
+  const isLocked = tree ? !tree.editable : false;
 
   useEffect(() => {
     const variables = tree?.variables || [];
@@ -183,6 +191,7 @@ function InstrumentTab({ projectId, versionId, isLoadingInstrument, onCreateInst
   });
 
   const openStructureModal = (modal) => {
+    if (isLocked) return;
     addVariableMutation.reset();
     addDimensionMutation.reset();
     addSubdimensionMutation.reset();
@@ -252,6 +261,17 @@ function InstrumentTab({ projectId, versionId, isLoadingInstrument, onCreateInst
 
   return (
     <div className="min-w-0">
+      {isLocked ? (
+        <div className="m-4 flex gap-3 rounded-2xl border border-amber/20 bg-yellowSoft p-4">
+          <LockKeyhole size={18} className="mt-0.5 shrink-0 text-yellowDark" />
+          <div>
+            <p className="text-sm font-semibold text-dark">Instrumento oficial / protegido</p>
+            <p className="mt-1 text-xs text-yellowDark">
+              {LOCK_MESSAGES[tree?.lock_reason] || 'La estructura de este instrumento está bloqueada en su estado actual.'}
+            </p>
+          </div>
+        </div>
+      ) : null}
       <Card padded={false} className="rounded-none border-x-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-4">
           <div>
@@ -277,13 +297,14 @@ function InstrumentTab({ projectId, versionId, isLoadingInstrument, onCreateInst
             ) : (
               <InstrumentTreeView
                   tree={tree}
+                  readOnly={isLocked}
                   selectedVariableId={selectedVariableId}
                   onSelectVariable={setSelectedVariableId}
                   onAddVariable={() => openStructureModal({ type: 'variable', parent: null })}
                   onAddDimension={(parent) => openStructureModal({ type: 'dimension', parent })}
                   onAddSubdimension={(parent) => openStructureModal({ type: 'subdimension', parent })}
-                  onAddItem={(construct) => setItemDrawer({ mode: 'create', constructId: construct.id })}
-                  onEditItem={handleEditItem}
+                  onAddItem={(construct) => !isLocked && setItemDrawer({ mode: 'create', constructId: construct.id })}
+                  onEditItem={isLocked ? undefined : handleEditItem}
                 />
             )
           ) : isLoadingMatrix || !matrix ? (

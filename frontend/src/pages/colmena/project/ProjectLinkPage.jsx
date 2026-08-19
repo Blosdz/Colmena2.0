@@ -25,7 +25,7 @@ import { displayLabel } from '../../../utils/labels.js';
 
 const STUDY_TYPES = [
   { value: 'ACADEMIC', label: 'Académico' },
-  { value: 'CENSO', label: 'Censo' },
+  { value: 'CENSO', label: 'CensoPÁS' },
   { value: 'CUSTOM', label: 'Personalizado' },
   { value: 'RESEARCH', label: 'Investigación' },
 ];
@@ -39,14 +39,14 @@ const schema = z.object({
   minPublishableN: z.coerce.number().min(1).default(5),
 });
 
-function NewStudyModal({ surveys, onClose, onCreate, isSubmitting }) {
+function NewStudyModal({ surveys, projectType, onClose, onCreate, isSubmitting }) {
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { surveyId: surveys[0]?.id || '', studyType: 'ACADEMIC', minPublishableN: 5 },
+    defaultValues: { surveyId: surveys[0]?.id || '', studyType: projectType === 'CENSO' ? 'CENSO' : 'ACADEMIC', minPublishableN: 5 },
   });
 
   const formId = 'new-study-form';
@@ -81,16 +81,18 @@ function NewStudyModal({ surveys, onClose, onCreate, isSubmitting }) {
           </select>
           {errors.surveyId ? <span className="text-xs font-medium text-danger">{errors.surveyId.message}</span> : null}
         </label>
-        <label className="flex flex-col gap-2">
-          <span className="colmena-label">Tipo</span>
-          <select className="colmena-input h-10 px-4 text-sm text-dark" {...register('studyType')}>
-            {STUDY_TYPES.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {projectType === 'CENSO' ? (
+          <input type="hidden" value="CENSO" {...register('studyType')} />
+        ) : (
+          <label className="flex flex-col gap-2">
+            <span className="colmena-label">Tipo</span>
+            <select className="colmena-input h-10 px-4 text-sm text-dark" {...register('studyType')}>
+              {STUDY_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>{type.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <FormField
           label="N mínimo publicable"
           type="number"
@@ -255,6 +257,7 @@ export default function ProjectLinkPage() {
       {showNewStudy ? (
         <NewStudyModal
           surveys={surveys}
+          projectType={project.project_type}
           onClose={() => setShowNewStudy(false)}
           onCreate={(values) => createMutation.mutate(values)}
           isSubmitting={createMutation.isPending}

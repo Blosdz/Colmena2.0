@@ -1,6 +1,7 @@
 """Telemetría de participación: agrega response_sessions ya creadas
 (vía el flujo público), no ejecuta ningún cálculo de scoring."""
 
+import pytest
 from httpx import AsyncClient
 
 
@@ -129,3 +130,110 @@ async def test_study_and_project_telemetry(
 async def test_study_telemetry_not_found(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/studies/999999/telemetry")
     assert resp.status_code == 404
+
+
+async def test_study_telemetry_participation_funnel_with_invitations(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    """Convocados/tasa recibida/tasa válida sólo deben poblarse cuando el
+    estudio exige invitación individual (E-17) y hay invitaciones emitidas —
+    ver TelemetryService._participation_funnel."""
+    _instrument, version = seed_instrument_draft
+    project = seed_project
+
+    item = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version.id}/items",
+            json={"code": "P1", "question_text": "Pregunta 1", "question_type": "NUMBER"},
+        )
+    ).json()
+    survey = (
+        await client.post(
+            f"/api/v1/projects/{project.id}/surveys/from-instrument",
+            json={
+                "created_by_user_id": seed_user.id,
+                "instrument_version_id": version.id,
+                "name": "Encuesta telemetría con invitaciones",
+            },
+        )
+    ).json()
+    study = (
+        await client.post(
+            f"/api/v1/projects/{project.id}/studies",
+            json={
+                "survey_id": survey["id"],
+                "name": "Estudio con invitaciones",
+                "study_type": "CUSTOM",
+                "requires_invitation": True,
+            },
+        )
+    ).json()
+    await client.post(f"/api/v1/studies/{study['id']}/open")
+
+    tokens = (
+        await client.post(f"/api/v1/studies/{study['id']}/invitations", json={"count": 3})
+    ).json()["tokens"]
+    assert len(tokens) == 3
+
+    # Sólo 2 de las 3 invitaciones se consumen; la tercera queda sin usar.
+    for token in tokens[:2]:
+        session = (
+            await client.post(
+                f"/api/v1/public/studies/{study['public_id']}/response-sessions",
+                json={"invitation_token": token},
+            )
+        ).json()
+        await client.put(
+            f"/api/v1/response-sessions/{session['id']}/responses/{item['id']}",
+            json={"numeric_value": 5},
+        )
+        await client.post(f"/api/v1/response-sessions/{session['id']}/complete")
+
+    telemetry = (await client.get(f"/api/v1/studies/{study['id']}/telemetry")).json()
+
+    assert telemetry["invited_count"] == 3
+    assert telemetry["started_count"] == 2
+    assert telemetry["not_responded_count"] == 1
+    assert telemetry["response_rate"] == pytest.approx(2 / 3)
+    assert telemetry["valid_count"] == 2
+    assert telemetry["valid_rate"] == pytest.approx(2 / 3)
+    assert telemetry["median_duration_seconds"] is not None
+
+
+async def test_study_telemetry_funnel_is_none_without_invitations(
+    client: AsyncClient, seed_user, seed_project, seed_instrument_draft
+) -> None:
+    """Estudios de enlace público (requires_invitation=False, el default) no
+    tienen una población objetivo contable: el funnel debe quedar en None en
+    vez de fabricar una tasa con un denominador incorrecto."""
+    _instrument, version = seed_instrument_draft
+    project = seed_project
+    await client.post(
+        f"/api/v1/instrument-versions/{version.id}/items",
+        json={"code": "P1", "question_text": "Pregunta 1", "question_type": "NUMBER"},
+    )
+    survey = (
+        await client.post(
+            f"/api/v1/projects/{project.id}/surveys/from-instrument",
+            json={
+                "created_by_user_id": seed_user.id,
+                "instrument_version_id": version.id,
+                "name": "Encuesta enlace público",
+            },
+        )
+    ).json()
+    study = (
+        await client.post(
+            f"/api/v1/projects/{project.id}/studies",
+            json={"survey_id": survey["id"], "name": "Estudio enlace público", "study_type": "CUSTOM"},
+        )
+    ).json()
+    await client.post(f"/api/v1/studies/{study['id']}/open")
+    await client.post(f"/api/v1/public/studies/{study['public_id']}/response-sessions")
+
+    telemetry = (await client.get(f"/api/v1/studies/{study['id']}/telemetry")).json()
+
+    assert telemetry["invited_count"] is None
+    assert telemetry["not_responded_count"] is None
+    assert telemetry["response_rate"] is None
+    assert telemetry["valid_rate"] is None

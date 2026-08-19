@@ -13,12 +13,16 @@ const ArchiveProjectsPage = lazy(() => import('./pages/colmena/ArchiveProjectsPa
 const SettingsPage = lazy(() => import('./pages/colmena/SettingsPage.jsx'));
 const NotFoundPage = lazy(() => import('./pages/colmena/NotFoundPage.jsx'));
 const ProjectConstructorPage = lazy(() => import('./pages/colmena/project/ProjectConstructorPage.jsx'));
+const ProjectInstrumentsPage = lazy(() => import('./pages/colmena/project/ProjectInstrumentsPage.jsx'));
 const ProjectFormPage = lazy(() => import('./pages/colmena/project/ProjectFormPage.jsx'));
 const ProjectLinkPage = lazy(() => import('./pages/colmena/project/ProjectLinkPage.jsx'));
 const ProjectTelemetryPage = lazy(() => import('./pages/colmena/project/AdaptiveProjectTelemetryPage.jsx'));
 const ProjectResultsPage = lazy(() => import('./pages/colmena/project/ProjectResultsPage.jsx'));
 const ProjectReportsPage = lazy(() => import('./pages/colmena/project/ProjectReportsPage.jsx'));
 const ProjectPremiumDashboardPage = lazy(() => import('./pages/colmena/project/ProjectPremiumDashboardPage.jsx'));
+const ProjectAnalyticsLabPage = lazy(() => import('./pages/colmena/project/ProjectAnalyticsLabPage.jsx'));
+const ProjectPlanPage = lazy(() => import('./pages/colmena/project/ProjectPlanPage.jsx'));
+const ProjectExportsPage = lazy(() => import('./pages/colmena/project/ProjectExportsPage.jsx'));
 
 export default function App() {
   return (
@@ -40,12 +44,16 @@ export default function App() {
 
         <Route path="project/new" element={<ProjectConstructorPage />} />
         <Route path="project/:projectId" element={<ProjectConstructorPage />} />
+        <Route path="project/:projectId/instruments" element={<ProjectInstrumentsPage />} />
         <Route path="project/:projectId/form" element={<ProjectFormPage />} />
         <Route path="project/:projectId/link" element={<ProjectLinkPage />} />
         <Route path="project/:projectId/telemetry" element={<ProjectTelemetryPage />} />
         <Route path="project/:projectId/results" element={<ProjectResultsPage />} />
         <Route path="project/:projectId/premium" element={<ProjectPremiumDashboardPage />} />
+        <Route path="project/:projectId/analytics-lab" element={<ProjectAnalyticsLabPage />} />
+        <Route path="project/:projectId/plan" element={<ProjectPlanPage />} />
         <Route path="project/:projectId/reports" element={<ProjectReportsPage />} />
+        <Route path="project/:projectId/exports" element={<ProjectExportsPage />} />
 
         <Route path="archive/projects" element={<ArchiveProjectsPage />} />
         <Route path="settings" element={<SettingsPage />} />

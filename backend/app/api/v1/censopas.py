@@ -21,6 +21,7 @@ from app.schemas.censopas import (
     CensopasManifest,
     CensopasManifestImportRead,
     CensopasManifestValidation,
+    CensopasPlansResponse,
     CensopasReadiness,
     CensopasResultsResponse,
     CensopasUnitResultsResponse,
@@ -29,10 +30,20 @@ from app.schemas.censopas import (
     ScoringRuleRead,
 )
 from app.repositories.analytics import AnalyticsRepository
+from app.services.censopas_methodology import resolve_official_equivalence_enabled
 from app.services.censopas_service import CensopasScoringService
+from app.services.scoring_orchestrator import run_canonical_scoring
 from app.services.study_service import StudyService
 
 router = APIRouter(tags=["censopas"])
+
+
+@router.get("/censopas/plans", response_model=CensopasPlansResponse)
+async def list_censopas_plans(session: AsyncSession = Depends(get_db)):
+    """Catálogo de 'planes' (alias de negocio: Plan corto/Plan medio) — sólo
+    versiones oficiales de CENSOPAS-COPSOQ ya publicadas y protegidas."""
+    plans = await CensopasScoringService(session).list_official_plans()
+    return CensopasPlansResponse(plans=plans)
 
 
 @router.post(
@@ -195,8 +206,10 @@ async def add_barem_cutoff(
 
 @router.post("/studies/{study_id}/censopas/scoring", response_model=AnalysisRunRead)
 async def run_censopas_scoring(study_id: int, session: AsyncSession = Depends(get_db)):
-    service = CensopasScoringService(session)
-    run = await service.run_scoring(study_id)
+    # Alias de compatibilidad: llama al mismo orquestador que
+    # POST /studies/{id}/scoring — para un estudio CENSOPAS ambos producen
+    # una única corrida canónica (analysis_run), nunca dos independientes.
+    run, _summary = await run_canonical_scoring(session, study_id)
     # CENSOPAS scoring no persiste analysis_results genéricos (usa
     # construct_results); recargar con `results` eager-loaded evita un
     # lazy-load fuera de contexto async al serializar la respuesta.
@@ -228,22 +241,29 @@ async def get_censopas_results(study_id: int, session: AsyncSession = Depends(ge
     study = await study_service.get(study_id)
 
     scoring_status = "NOT_CONFIGURED"
-    official_equivalence_enabled = False
     if study.instrument_version_id is not None:
         version = await study_service.instrument_repo.get_version_with_instrument(
             study.instrument_version_id
         )
         if version is not None:
             scoring_status = version.scoring_status
-            official_equivalence_enabled = bool(
-                version.instrument.metadata_.get("official_equivalence_enabled", False)
-            )
+    official_equivalence_enabled = await resolve_official_equivalence_enabled(
+        study_service.instrument_repo, study.instrument_version_id
+    )
 
     service = CensopasScoringService(session)
     results = await service.get_results_or_conflict(study_id)
+    barem = await service.repo.get_barem(study.barem_id) if study.barem_id else None
     payload = [
-        ConstructResultRead(**service.apply_privacy(r, study.min_publishable_n)) for r in results
+        service.apply_privacy(
+            r,
+            study.min_publishable_n,
+            barem=barem,
+            official_equivalence_enabled=official_equivalence_enabled,
+        )
+        for r in results
     ]
+    payload = [ConstructResultRead(**row) for row in service.attach_priority_ranks(payload)]
 
     return CensopasResultsResponse(
         study_id=study_id,

@@ -139,13 +139,19 @@ class BaremCutoffRead(BaseModel):
 
 
 class ConstructResultRead(BaseModel):
-    """Resultado por constructo, con supresión de privacidad ya aplicada (§31)."""
+    """Resultado por constructo, con supresión de privacidad ya aplicada (§31).
+
+    El frontend nunca debe inferir favorable/intermedio/desfavorable leyendo
+    texto de labels — estos campos ya vienen resueltos por el backend.
+    """
 
     construct_id: int
     construct_code: str
     construct_name: str
+    construct_type: str
     n_valid: int
     suppressed: bool
+    suppression_reason: str | None = None
     favorable_n: int | None
     intermediate_n: int | None
     unfavorable_n: int | None
@@ -155,6 +161,10 @@ class ConstructResultRead(BaseModel):
     construct_score: float | None
     classification_status: str
     collective_classification: str | None
+    priority_rank: int | None = None
+    barem_id: int | None = None
+    barem_status: str | None = None
+    official_equivalence: bool = False
 
 
 class CensopasResultsResponse(BaseModel):
@@ -162,6 +172,30 @@ class CensopasResultsResponse(BaseModel):
     scoring_status: str
     official_equivalence_enabled: bool
     results: list[ConstructResultRead]
+
+
+class CensopasPlanRead(BaseModel):
+    """Catálogo de 'planes' (alias de negocio sobre `InstrumentVersion` oficiales,
+    `is_system=True`, `status` publicado). Solo expone versiones ya activadas —
+    nunca `DRAFT`/`TEST` — para que el selector de la empresa jamás ofrezca una
+    versión en construcción."""
+
+    instrument_id: int
+    instrument_version_id: int
+    version_kind: Literal["SHORT", "MEDIUM"]
+    version_code: str
+    status: str
+    plan_label: str
+    plan_description: str
+    question_count: int
+    scored_item_count: int
+    dimension_count: int
+    subdimension_count: int
+    ready_for_scoring: bool
+
+
+class CensopasPlansResponse(BaseModel):
+    plans: list[CensopasPlanRead] = Field(default_factory=list)
 
 
 class CensopasReadiness(BaseModel):
@@ -173,11 +207,12 @@ class CensopasReadiness(BaseModel):
     actual: dict[str, int]
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    is_censopas_instrument: bool = False
 
 class CensopasManifestOption(BaseModel):
     raw_code: str = Field(min_length=1, max_length=100)
     label: str = Field(min_length=1)
-    numeric_value: float = Field(ge=1, le=5)
+    numeric_value: float = Field(ge=1)
     sort_order: int | None = None
 
 
@@ -260,7 +295,6 @@ class CensopasUnitResultRead(ConstructResultRead):
     unit_code: str | None
     unit_name: str
     grouped_units: list[str] = Field(default_factory=list)
-    suppression_reason: str | None = None
 
 
 class CensopasUnitResultsResponse(BaseModel):

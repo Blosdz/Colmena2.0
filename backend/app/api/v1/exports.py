@@ -36,6 +36,13 @@ async def get_export(export_id: int, session: AsyncSession = Depends(get_db)):
     return ExportRead.model_validate(export)
 
 
+@router.get("/studies/{study_id}/exports", response_model=list[ExportRead])
+async def list_exports(study_id: int, session: AsyncSession = Depends(get_db)):
+    service = ExportService(session)
+    exports = await service.list_exports(study_id)
+    return [ExportRead.model_validate(export) for export in exports]
+
+
 @router.get("/exports/{export_id}/download")
 async def download_export(export_id: int, session: AsyncSession = Depends(get_db)):
     service = ExportService(session)

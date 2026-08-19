@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.pagination import Page, PageParams, page_params
+from app.core.security import get_current_user
+from app.models.user import OrganizationMembership, User
 from app.schemas.projects import ProjectCreate, ProjectRead, ProjectUpdate
 from app.services.project_service import ProjectService
 
@@ -12,9 +15,31 @@ router = APIRouter(tags=["projects"])
 
 
 @router.post("/projects", response_model=ProjectRead, status_code=201)
-async def create_project(payload: ProjectCreate, session: AsyncSession = Depends(get_db)):
+async def create_project(
+    payload: ProjectCreate,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # El propietario nunca se toma del cuerpo (un cliente no debe poder crear
+    # proyectos a nombre de otro usuario) — se deriva siempre del JWT.
+    overrides: dict = {"owner_user_id": current_user.id}
+    if payload.organization_id is None:
+        membership = (
+            (
+                await session.execute(
+                    select(OrganizationMembership).where(
+                        OrganizationMembership.user_id == current_user.id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if membership is not None:
+            overrides["organization_id"] = membership.organization_id
+
     service = ProjectService(session)
-    project = await service.create(payload)
+    project = await service.create(payload.model_copy(update=overrides))
     return ProjectRead.model_validate(project)
 
 

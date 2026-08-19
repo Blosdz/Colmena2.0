@@ -162,6 +162,148 @@ async def _setup_censopas_study(
     return study, dimension
 
 
+async def test_censopas_media_dimension_gets_bands_from_subdimension_items(
+    client: AsyncClient, seed_user, seed_project
+) -> None:
+    """Versión MEDIA: D1 no tiene item_links directos (sólo S1/S2 los tienen),
+    pero debe quedar puntuada y baremada igual — antes de la corrección, D1
+    quedaba con bands=[] (bug bloqueante, ver auditoría de Resultados)."""
+    instrument = (
+        await client.post("/api/v1/instruments", json={"name": "CENSOPAS test", "is_system": False})
+    ).json()
+    version = (
+        await client.post(
+            f"/api/v1/instruments/{instrument['id']}/versions",
+            json={"version_code": "V1", "status": "DRAFT"},
+        )
+    ).json()
+    variable = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/structure-variables",
+            json={"code": "CENSOPAS", "name": "CENSOPAS", "role": "OUTCOME"},
+        )
+    ).json()
+    item1 = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/items",
+            json={"code": "P1", "question_text": "Exigencia 1", "question_type": "LIKERT"},
+        )
+    ).json()
+    item2 = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/items",
+            json={"code": "P2", "question_text": "Exigencia 2", "question_type": "LIKERT"},
+        )
+    ).json()
+
+    dimension = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/constructs",
+            json={"parent_id": variable["id"], "code": "D1", "name": "Exigencias psicológicas", "construct_type": "DIMENSION"},
+        )
+    ).json()
+    sub1 = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/constructs",
+            json={"parent_id": dimension["id"], "code": "S1", "name": "Subdimensión 1", "construct_type": "SUBDIMENSION"},
+        )
+    ).json()
+    sub2 = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/constructs",
+            json={"parent_id": dimension["id"], "code": "S2", "name": "Subdimensión 2", "construct_type": "SUBDIMENSION"},
+        )
+    ).json()
+    # Sólo las subdimensiones tienen item_links directos — D1 (la dimensión)
+    # no tiene ninguno, tal como en la versión MEDIA real.
+    await client.post(
+        f"/api/v1/constructs/{sub1['id']}/items",
+        json={"question_id": item1["id"], "weight": 1, "scoring_direction": "DIRECT"},
+    )
+    await client.post(
+        f"/api/v1/constructs/{sub2['id']}/items",
+        json={"question_id": item2["id"], "weight": 1, "scoring_direction": "REVERSE"},
+    )
+
+    scale_map = {"1": 0, "2": 25, "3": 50, "4": 75, "5": 100}
+    await client.post(
+        f"/api/v1/instrument-versions/{version['id']}/scoring-rules",
+        json={"question_id": item1["id"], "parameters": {"map": scale_map}},
+    )
+    await client.post(
+        f"/api/v1/instrument-versions/{version['id']}/scoring-rules",
+        json={"question_id": item2["id"], "parameters": {"map": scale_map}},
+    )
+
+    barem = (
+        await client.post(
+            f"/api/v1/instrument-versions/{version['id']}/barems",
+            json={"name": "Barem de prueba MEDIA"},
+        )
+    ).json()
+    # Cortes tanto para D1 (dimensión) como para S1 (subdimensión) — ambos
+    # niveles deben quedar baremados en la versión MEDIA.
+    for construct_id in (dimension["id"], sub1["id"]):
+        await client.post(
+            f"/api/v1/barems/{barem['id']}/cutoffs",
+            json={"construct_id": construct_id, "cut_1": 33, "cut_2": 66, "direction": "LOWER_BETTER"},
+        )
+
+    survey = (
+        await client.post(
+            f"/api/v1/projects/{seed_project.id}/surveys/from-instrument",
+            json={
+                "created_by_user_id": seed_user.id,
+                "instrument_version_id": version["id"],
+                "name": "Encuesta CENSOPAS media",
+            },
+        )
+    ).json()
+    study = (
+        await client.post(
+            f"/api/v1/projects/{seed_project.id}/studies",
+            json={
+                "survey_id": survey["id"],
+                "name": "Estudio CENSOPAS media",
+                "study_type": "CENSO",
+                "min_publishable_n": 1,
+            },
+        )
+    ).json()
+    await client.patch(f"/api/v1/studies/{study['id']}", json={"barem_id": barem["id"]})
+    await client.post(f"/api/v1/studies/{study['id']}/open")
+
+    for p1_code, p2_code in (("5", "1"), ("5", "1"), ("1", "5")):
+        rs = (await client.post(f"/api/v1/studies/{study['id']}/response-sessions")).json()
+        await client.put(
+            f"/api/v1/response-sessions/{rs['id']}/responses/{item1['id']}",
+            json={"raw_code": p1_code},
+        )
+        await client.put(
+            f"/api/v1/response-sessions/{rs['id']}/responses/{item2['id']}",
+            json={"raw_code": p2_code},
+        )
+        await client.post(f"/api/v1/response-sessions/{rs['id']}/complete")
+
+    scoring_resp = await client.post(f"/api/v1/studies/{study['id']}/scoring")
+    assert scoring_resp.status_code == 200, scoring_resp.text
+
+    results_resp = await client.get(f"/api/v1/studies/{study['id']}/censopas/results")
+    assert results_resp.status_code == 200, results_resp.text
+    results = results_resp.json()["results"]
+
+    d1_result = next(r for r in results if r["construct_id"] == dimension["id"])
+    assert d1_result["n_valid"] == 3
+    assert d1_result["favorable_n"] + d1_result["intermediate_n"] + d1_result["unfavorable_n"] == 3
+    assert d1_result["collective_classification"] is not None
+    assert d1_result["construct_type"] == "DIMENSION"
+
+    s1_result = next(r for r in results if r["construct_id"] == sub1["id"])
+    assert s1_result["n_valid"] == 3
+    assert s1_result["favorable_n"] + s1_result["intermediate_n"] + s1_result["unfavorable_n"] == 3
+    assert s1_result["construct_type"] == "SUBDIMENSION"
+
+
 async def test_censopas_scoring_and_results_with_low_min_n(
     client: AsyncClient, seed_user, seed_project
 ) -> None:
@@ -182,7 +324,9 @@ async def test_censopas_scoring_and_results_with_low_min_n(
     assert result["n_valid"] == 3
     # Con LOWER_BETTER: P1=5(REVERSE en P2 lo compensa) — el punto clave es
     # que el pipeline corrió de extremo a extremo con datos coherentes.
-    assert result["classification_status"] == "PROVISIONAL"
+    # "BAREMED" (motor canónico ScoringService) reemplaza al antiguo
+    # "PROVISIONAL" del motor CENSOPAS retirado — la corrida sí tiene barem.
+    assert result["classification_status"] == "BAREMED"
     assert result["favorable_n"] + result["intermediate_n"] + result["unfavorable_n"] == 3
 
 

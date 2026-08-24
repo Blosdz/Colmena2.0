@@ -148,7 +148,16 @@ def build_manifest(data: dict, version_kind: VersionKind, manifest_version: str)
         if not entry["is_scored"]:
             continue
 
-        construct_code = entry["subdimension_code"] or entry["dimension_code"]
+        # La versión SHORT sólo publica constructos de dimensión (más abajo,
+        # `constructs` no agrega subdimensiones salvo en MEDIUM) — aunque el
+        # JSON trae `subdimension_code` también para preguntas SHORT, un
+        # ítem SHORT debe enlazarse siempre a su dimensión o
+        # `items_by_construct[subdim_code]` revienta con KeyError.
+        construct_code = (
+            entry["dimension_code"]
+            if version_kind == "SHORT"
+            else entry["subdimension_code"] or entry["dimension_code"]
+        )
         links = items_by_construct[construct_code]
         links.append(
             CensopasManifestItemLink(

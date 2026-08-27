@@ -56,6 +56,11 @@ class InstrumentVersion(Base, PublicIdMixin, TimestampMixin):
     scoring_status: Mapped[str] = mapped_column(
         String(40), nullable=False, default="NOT_CONFIGURED"
     )
+    instrument_kind: Mapped[str | None] = mapped_column(String(20))
+    total_questions: Mapped[int | None] = mapped_column()
+    psychosocial_questions: Mapped[int | None] = mapped_column()
+    dimension_count: Mapped[int | None] = mapped_column()
+    subdimension_count: Mapped[int] = mapped_column(nullable=False, default=0)
     source_reference: Mapped[str | None] = mapped_column(Text)
     config: Mapped[dict] = mapped_column(JSONVariant, nullable=False, default=dict)
 

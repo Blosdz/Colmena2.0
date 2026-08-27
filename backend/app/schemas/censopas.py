@@ -198,6 +198,43 @@ class CensopasPlansResponse(BaseModel):
     plans: list[CensopasPlanRead] = Field(default_factory=list)
 
 
+class CensopasInstrumentCatalogRead(BaseModel):
+    code: str
+    name: str
+    questions: int
+    psychosocial_questions: int
+    dimensions: int
+    subdimensions: int
+    recommended_population: str
+
+
+class AnalyticsToolCatalogRead(BaseModel):
+    code: str
+    name: str
+    category: str
+    description: str | None = None
+
+
+class AnalyticsPlanCatalogRead(BaseModel):
+    code: str
+    name: str
+    description: str | None = None
+    level: int
+    tools: list[AnalyticsToolCatalogRead] = Field(default_factory=list)
+
+
+class CensopasCatalogResponse(BaseModel):
+    instrument_versions: list[CensopasInstrumentCatalogRead] = Field(default_factory=list)
+    analytics_plans: list[AnalyticsPlanCatalogRead] = Field(default_factory=list)
+
+
+class StudyAnalyticsToolsResponse(BaseModel):
+    study_id: int
+    plan_code: str
+    plan_name: str
+    tools: list[AnalyticsToolCatalogRead] = Field(default_factory=list)
+
+
 class CensopasReadiness(BaseModel):
     instrument_version_id: int
     version_kind: Literal["SHORT", "MEDIUM", "UNKNOWN"]

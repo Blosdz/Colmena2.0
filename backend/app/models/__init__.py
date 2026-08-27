@@ -6,6 +6,12 @@ Importar este módulo garantiza que todas las clases queden registradas en
 """
 
 from app.models.analysis import AnalysisMethod, AnalysisResult, AnalysisRun
+from app.models.analytics_plan import (
+    AnalyticsPlan,
+    AnalyticsPlanTool,
+    OrganizationCollaboratorCode,
+    StatisticalTool,
+)
 from app.models.audit import AuditLog
 from app.models.base import Base
 from app.models.censopas import Barem, BaremBand, BaremCutoff, ConstructResult, ConstructScore, ResponseScore
@@ -56,6 +62,10 @@ __all__ = [
     "AnalysisMethod",
     "AnalysisRun",
     "AnalysisResult",
+    "AnalyticsPlan",
+    "StatisticalTool",
+    "AnalyticsPlanTool",
+    "OrganizationCollaboratorCode",
     "ResponseScore",
     "Barem",
     "BaremBand",

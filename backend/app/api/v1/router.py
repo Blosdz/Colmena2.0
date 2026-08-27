@@ -8,6 +8,7 @@ from app.api.v1 import (
     constructs,
     exports,
     instruments,
+    organizations,
     projects,
     public,
     reports,
@@ -22,6 +23,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router)
 api_router.include_router(projects.router)
 api_router.include_router(instruments.router)
+api_router.include_router(organizations.router)
 api_router.include_router(variables.router)
 api_router.include_router(constructs.router)
 api_router.include_router(surveys.router)

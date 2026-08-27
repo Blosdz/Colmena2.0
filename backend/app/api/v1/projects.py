@@ -23,7 +23,7 @@ async def create_project(
     # El propietario nunca se toma del cuerpo (un cliente no debe poder crear
     # proyectos a nombre de otro usuario) — se deriva siempre del JWT.
     overrides: dict = {"owner_user_id": current_user.id}
-    if payload.organization_id is None:
+    if payload.organization_id is None and payload.new_organization is None:
         membership = (
             (
                 await session.execute(
@@ -45,23 +45,35 @@ async def create_project(
 
 @router.get("/projects", response_model=Page[ProjectRead])
 async def list_projects(
-    params: PageParams = Depends(page_params), session: AsyncSession = Depends(get_db)
+    params: PageParams = Depends(page_params),
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     service = ProjectService(session)
-    return await service.list(params)
+    return await service.list(params, owner_user_id=current_user.id)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectRead)
-async def get_project(project_id: int, session: AsyncSession = Depends(get_db)):
+async def get_project(
+    project_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     service = ProjectService(session)
     project = await service.get(project_id)
+    await service.ensure_access(project, current_user, write=False)
     return ProjectRead.model_validate(project)
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectRead)
 async def update_project(
-    project_id: int, payload: ProjectUpdate, session: AsyncSession = Depends(get_db)
+    project_id: int,
+    payload: ProjectUpdate,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     service = ProjectService(session)
+    existing = await service.get(project_id)
+    await service.ensure_access(existing, current_user, write=True)
     project = await service.update(project_id, payload)
     return ProjectRead.model_validate(project)

@@ -12,6 +12,7 @@ from app.core.exceptions import ConflictError, NotFoundError, ValidationDomainEr
 from app.core.pagination import Page, PageParams, paginate
 from app.models.study import Study, StudySnapshot, StudyUnit, StudyUnitType
 from app.models.censopas import Barem
+from app.models.analytics_plan import AnalyticsPlan
 from app.models.construct import Construct
 from app.models.option_set import OptionSet
 from app.models.project import Project
@@ -57,6 +58,18 @@ class StudyService:
             raise NotFoundError(f"Proyecto {project_id} no encontrado")
         study_type = payload.study_type
         barem_id = None
+        analytics_plan_id = None
+        plan = (
+            await self.session.execute(
+                select(AnalyticsPlan).where(
+                    AnalyticsPlan.code == payload.analytics_plan,
+                    AnalyticsPlan.is_active.is_(True),
+                )
+            )
+        ).scalars().first()
+        if plan is None and project.project_type == "CENSO":
+            raise ValidationDomainError(f"El plan analítico '{payload.analytics_plan}' no está disponible.")
+        analytics_plan_id = plan.id if plan is not None else None
         if project.project_type == "CENSO":
             study_type = "CENSO"
             configured_barem_id = (project.metadata_ or {}).get("barem_id")
@@ -75,6 +88,7 @@ class StudyService:
             name=payload.name,
             study_type=study_type,
             barem_id=barem_id,
+            analytics_plan_id=analytics_plan_id,
             start_at=payload.start_at,
             end_at=payload.end_at,
             min_publishable_n=payload.min_publishable_n,

@@ -35,6 +35,9 @@ class Study(Base, PublicIdMixin, TimestampMixin):
     instrument_version_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("instrument_versions.id")
     )
+    analytics_plan_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("analytics_plans.id")
+    )
     barem_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("barems.id"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     study_type: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -51,6 +54,7 @@ class Study(Base, PublicIdMixin, TimestampMixin):
 
     survey = relationship("Survey")
     instrument_version = relationship("InstrumentVersion")
+    analytics_plan = relationship("AnalyticsPlan")
     snapshots: Mapped[list["StudySnapshot"]] = relationship(
         back_populates="study", cascade="all, delete-orphan"
     )
@@ -68,6 +72,10 @@ class Study(Base, PublicIdMixin, TimestampMixin):
     @property
     def instrument_version_code(self) -> str | None:
         return self.instrument_version.version_code if self.instrument_version else None
+
+    @property
+    def analytics_plan_code(self) -> str | None:
+        return self.analytics_plan.code if self.analytics_plan else None
 
 
 class StudySnapshot(Base):

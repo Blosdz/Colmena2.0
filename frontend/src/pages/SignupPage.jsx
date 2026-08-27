@@ -17,9 +17,6 @@ const schema = z
     username: z.string().min(3, 'Mínimo 3 caracteres').max(120),
     password: z.string().min(8, 'Mínimo 8 caracteres'),
     confirmPassword: z.string(),
-    organizationName: z.string().trim().max(255).optional(),
-    taxId: z.string().trim().max(80).optional(),
-    organizationType: z.string().trim().max(80).optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Las contraseñas no coinciden',
@@ -98,35 +95,6 @@ export default function SignupPage() {
               {...register('confirmPassword')}
             />
           </div>
-
-          <fieldset className="rounded-xl border border-border p-4">
-            <legend className="colmena-label px-1">Empresa (opcional)</legend>
-            <p className="mb-3 text-xs text-muted">
-              Si vas a aplicar un censo psicosocial (ej. CENSOPAS-COPSOQ), registra aquí tu empresa —
-              quedará vinculada a los proyectos que crees.
-            </p>
-            <div className="grid grid-cols-1 gap-4">
-              <FormField
-                label="Razón social / nombre de la empresa"
-                autoComplete="organization"
-                error={errors.organizationName?.message}
-                {...register('organizationName')}
-              />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <FormField
-                  label="RUC / identificación tributaria"
-                  error={errors.taxId?.message}
-                  {...register('taxId')}
-                />
-                <FormField
-                  label="Sector / rubro"
-                  placeholder="Ej. Minería, Salud, Manufactura"
-                  error={errors.organizationType?.message}
-                  {...register('organizationType')}
-                />
-              </div>
-            </div>
-          </fieldset>
 
           {formError ? (
             <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-danger">{formError}</p>

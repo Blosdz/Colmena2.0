@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.models.analytics_plan import AnalyticsPlan, AnalyticsPlanTool
+from app.models.instrument import Instrument, InstrumentVersion
 from app.schemas.analytics import AnalysisRunRead
 from app.schemas.censopas import (
     BaremActivationRead,
@@ -18,6 +22,10 @@ from app.schemas.censopas import (
     CensopasBaremImportRead,
     CensopasBaremManifest,
     CensopasBaremManifestValidation,
+    CensopasCatalogResponse,
+    CensopasInstrumentCatalogRead,
+    AnalyticsPlanCatalogRead,
+    AnalyticsToolCatalogRead,
     CensopasManifest,
     CensopasManifestImportRead,
     CensopasManifestValidation,
@@ -44,6 +52,77 @@ async def list_censopas_plans(session: AsyncSession = Depends(get_db)):
     versiones oficiales de CENSOPAS-COPSOQ ya publicadas y protegidas."""
     plans = await CensopasScoringService(session).list_official_plans()
     return CensopasPlansResponse(plans=plans)
+
+
+@router.get("/censopas/catalog", response_model=CensopasCatalogResponse)
+async def censopas_catalog(session: AsyncSession = Depends(get_db)):
+    versions = list(
+        (
+            await session.execute(
+                select(InstrumentVersion)
+                .join(Instrument, Instrument.id == InstrumentVersion.instrument_id)
+                .where(
+                    Instrument.code == "CENSOPAS_COPSOQ",
+                    Instrument.is_system.is_(True),
+                    InstrumentVersion.status.in_(("ACTIVE", "LOCKED")),
+                    InstrumentVersion.instrument_kind.is_not(None),
+                )
+                .order_by(InstrumentVersion.instrument_kind)
+            )
+        ).scalars()
+    )
+    versions_by_kind = {}
+    for version in sorted(
+        versions,
+        key=lambda item: (
+            item.instrument_kind or "",
+            0 if "OFICIAL" in item.version_code.upper() else 1,
+            -item.id,
+        ),
+    ):
+        versions_by_kind.setdefault(version.instrument_kind, version)
+
+    plans = list(
+        (
+            await session.execute(
+                select(AnalyticsPlan).where(AnalyticsPlan.is_active.is_(True)).order_by(AnalyticsPlan.level)
+                .options(selectinload(AnalyticsPlan.tools).selectinload(AnalyticsPlanTool.tool))
+            )
+        ).scalars()
+    )
+    return CensopasCatalogResponse(
+        instrument_versions=[
+            CensopasInstrumentCatalogRead(
+                code=f"CENSOPAS_{version.instrument_kind}",
+                name=f"CENSOPAS {'Corta' if version.instrument_kind == 'SHORT' else 'Media'}",
+                questions=version.total_questions or 0,
+                psychosocial_questions=version.psychosocial_questions or 0,
+                dimensions=version.dimension_count or 0,
+                subdimensions=version.subdimension_count or 0,
+                recommended_population="<25" if version.instrument_kind == "SHORT" else ">=25",
+            )
+            for version in versions_by_kind.values()
+        ],
+        analytics_plans=[
+            AnalyticsPlanCatalogRead(
+                code=plan.code,
+                name=plan.name,
+                description=plan.description,
+                level=plan.level,
+                tools=[
+                    AnalyticsToolCatalogRead(
+                        code=link.tool.code,
+                        name=link.tool.name,
+                        category=link.tool.category,
+                        description=link.tool.description,
+                    )
+                    for link in plan.tools
+                    if link.enabled and link.tool.is_active
+                ],
+            )
+            for plan in plans
+        ],
+    )
 
 
 @router.post(

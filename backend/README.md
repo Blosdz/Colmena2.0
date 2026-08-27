@@ -44,6 +44,23 @@ poetry run uvicorn app.main:app --reload
 
 La API queda disponible en `http://localhost:8000`, con documentación interactiva en `/docs`.
 
+## Seed de dos usuarios CensoPÁS
+
+El seed idempotente instala el catálogo oficial si hace falta y crea dos
+cuentas demo, cada una con su propia organización y proyecto: Ana usa el plan
+corto y Carlos el plan medio.
+
+```bash
+cd backend
+.venv/bin/python -m alembic upgrade head
+.venv/bin/python scripts/seed_two_censopas_users.py
+```
+
+Ambas cuentas usan la contraseña `ColmenaDemo2026!`:
+
+- `ana.torres@censopas.demo`
+- `carlos.mendoza@censopas.demo`
+
 ## Tests
 
 ```bash

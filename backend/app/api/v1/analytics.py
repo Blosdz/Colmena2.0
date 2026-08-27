@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.security import get_optional_current_user
+from app.core.security import get_current_user, get_optional_current_user
+from app.models.analytics_plan import AnalyticsPlan, AnalyticsPlanTool
+from app.models.study import Study
+from app.models.project import Project
 from app.models.user import User
 from app.schemas.analytics import (
     AnalysisMethodRead,
@@ -27,8 +32,10 @@ from app.schemas.analytics import (
     SpearmanMatrixRequest,
     SpearmanMatrixResponse,
 )
+from app.schemas.censopas import StudyAnalyticsToolsResponse, AnalyticsToolCatalogRead
 from app.services.analysis_service import AnalysisService
 from app.services.advanced_analysis_service import AdvancedAnalysisService
+from app.services.project_service import ProjectService
 
 router = APIRouter(tags=["analytics"])
 
@@ -38,6 +45,49 @@ async def list_analysis_methods(session: AsyncSession = Depends(get_db)):
     service = AnalysisService(session)
     methods = await service.list_methods()
     return [AnalysisMethodRead.model_validate(m) for m in methods]
+
+
+@router.get("/studies/{study_id}/analytics/tools", response_model=StudyAnalyticsToolsResponse)
+async def study_analytics_tools(
+    study_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    study = (
+        await session.execute(
+            select(Study).where(Study.id == study_id).options(
+                selectinload(Study.analytics_plan)
+                .selectinload(AnalyticsPlan.tools)
+                .selectinload(AnalyticsPlanTool.tool)
+            )
+        )
+    ).scalar_one_or_none()
+    if study is None:
+        from app.core.exceptions import NotFoundError
+        raise NotFoundError(f"Estudio {study_id} no encontrado")
+    project = await session.get(Project, study.project_id)
+    if project is None:
+        from app.core.exceptions import NotFoundError
+        raise NotFoundError(f"Proyecto del estudio {study_id} no encontrado")
+    await ProjectService(session).ensure_access(project, current_user, write=False)
+    plan = study.analytics_plan
+    if plan is None:
+        return StudyAnalyticsToolsResponse(study_id=study_id, plan_code="STANDARD", plan_name="Estándar")
+    return StudyAnalyticsToolsResponse(
+        study_id=study_id,
+        plan_code=plan.code,
+        plan_name=plan.name,
+        tools=[
+            AnalyticsToolCatalogRead(
+                code=link.tool.code,
+                name=link.tool.name,
+                category=link.tool.category,
+                description=link.tool.description,
+            )
+            for link in plan.tools
+            if link.enabled and link.tool.is_active
+        ],
+    )
 
 
 @router.post(
@@ -141,6 +191,7 @@ async def spearman_matrix(
     current_user: User | None = Depends(get_optional_current_user),
     session: AsyncSession = Depends(get_db),
 ):
+    await AnalysisService(session).require_plan_tools(study_id, ["SPEARMAN"])
     return await AdvancedAnalysisService(session).run_spearman_matrix(
         study_id, payload, current_user
     )
@@ -155,6 +206,7 @@ async def construct_compare_groups(
     payload: ConstructCompareGroupsRequest,
     session: AsyncSession = Depends(get_db),
 ):
+    await AnalysisService(session).require_plan_tools(study_id, ["MANN_WHITNEY", "KRUSKAL_WALLIS"])
     return await AdvancedAnalysisService(session).compare_construct_groups(study_id, payload)
 
 

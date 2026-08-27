@@ -34,10 +34,12 @@ from app.core.exceptions import (
     InsufficientSampleError,
     InvalidAnalysisAssumptionError,
     NotFoundError,
+    AuthorizationError,
     UnsupportedAnalysisError,
     ValidationDomainError,
 )
 from app.models.analysis import AnalysisResult, AnalysisRun
+from app.models.analytics_plan import AnalyticsPlanTool, StatisticalTool
 from app.models.censopas import ConstructScore
 from app.models.construct import Construct
 from app.models.response import Response
@@ -83,6 +85,30 @@ class AnalysisService:
         if study is None:
             raise NotFoundError(f"Estudio {study_id} no encontrado")
         return study
+
+    async def _require_plan_tools(self, study_id: int, tool_codes: list[str]) -> None:
+        study = await self._require_study(study_id)
+        if study.analytics_plan_id is None:
+            return
+        stmt = (
+            select(StatisticalTool.code)
+            .join(AnalyticsPlanTool, AnalyticsPlanTool.tool_id == StatisticalTool.id)
+            .where(
+                AnalyticsPlanTool.plan_id == study.analytics_plan_id,
+                AnalyticsPlanTool.enabled.is_(True),
+                StatisticalTool.code.in_(tool_codes),
+                StatisticalTool.is_active.is_(True),
+            )
+        )
+        enabled = set((await self.session.execute(stmt)).scalars().all())
+        if not enabled:
+            raise AuthorizationError(
+                f"El plan analítico del estudio no habilita: {', '.join(tool_codes)}."
+            )
+
+    async def require_plan_tools(self, study_id: int, tool_codes: list[str]) -> None:
+        """Validate a capability for endpoints implemented by another engine."""
+        await self._require_plan_tools(study_id, tool_codes)
 
     async def _load_variable(self, variable_id: int) -> Variable:
         variable = await self.session.get(Variable, variable_id)
@@ -342,7 +368,7 @@ class AnalysisService:
     # --- Chi-cuadrado (harness §24, §47) ----------------------------------------
 
     async def run_chi_square(self, study_id: int, payload: ChiSquareRequest) -> AnalysisRun:
-        await self._require_study(study_id)
+        await self._require_plan_tools(study_id, ["CHI_SQUARE"])
         row_var = await self._load_variable(payload.row_variable_id)
         col_var = await self._load_variable(payload.column_variable_id)
         run = await self._new_run(
@@ -392,7 +418,7 @@ class AnalysisService:
     # --- Comparar grupos: Mann-Whitney / Kruskal-Wallis (harness §24, §47) ------
 
     async def run_compare_groups(self, study_id: int, payload: CompareGroupsRequest) -> AnalysisRun:
-        await self._require_study(study_id)
+        await self._require_plan_tools(study_id, ["MANN_WHITNEY", "KRUSKAL_WALLIS"])
         dependent_var = await self._load_variable(payload.dependent_variable_id)
         group_var = await self._load_variable(payload.group_variable_id)
         run = await self._new_run(
@@ -467,7 +493,7 @@ class AnalysisService:
     # --- Correlación: Spearman (harness §24, §47) --------------------------------
 
     async def run_correlation(self, study_id: int, payload: CorrelationRequest) -> AnalysisRun:
-        await self._require_study(study_id)
+        await self._require_plan_tools(study_id, ["SPEARMAN"])
         var_x = await self._load_variable(payload.variable_x_id)
         var_y = await self._load_variable(payload.variable_y_id)
         run = await self._new_run(
@@ -516,7 +542,7 @@ class AnalysisService:
     # --- Confiabilidad (harness §26) ---------------------------------------------
 
     async def run_reliability(self, study_id: int, payload: ReliabilityRequest) -> AnalysisRun:
-        await self._require_study(study_id)
+        await self._require_plan_tools(study_id, list(payload.methods))
         stmt = (
             select(Construct)
             .where(Construct.id == payload.construct_id)
@@ -582,7 +608,7 @@ class AnalysisService:
     async def run_logistic_regression(
         self, study_id: int, payload: LogisticRegressionRequest
     ) -> AnalysisRun:
-        await self._require_study(study_id)
+        await self._require_plan_tools(study_id, ["LOGISTIC_REGRESSION"])
         outcome_var = await self._load_variable(payload.outcome_variable_id)
         predictor_vars = [await self._load_variable(vid) for vid in payload.predictor_variable_ids]
 
@@ -659,7 +685,7 @@ class AnalysisService:
         return await self.get_run(run.id)
 
     async def run_kmeans(self, study_id: int, payload: KMeansRequest) -> AnalysisRun:
-        await self._require_study(study_id)
+        await self._require_plan_tools(study_id, ["KMEANS"])
         variables = [await self._load_variable(vid) for vid in payload.variable_ids]
 
         run = await self._new_run(

@@ -19,6 +19,7 @@ class StudyCreate(BaseModel):
     min_publishable_n: int = Field(default=5, ge=1)
     settings: dict = Field(default_factory=dict)
     requires_invitation: bool = False
+    analytics_plan: Literal["STANDARD", "ADVANCED", "PREMIUM"] = "STANDARD"
 
 
 class StudyUpdate(BaseModel):
@@ -37,6 +38,8 @@ class StudyRead(BaseModel):
     project_id: int
     survey_id: int
     instrument_version_id: int | None
+    analytics_plan_id: int | None = None
+    analytics_plan_code: str | None = None
     instrument_id: int | None = None
     instrument_name: str | None = None
     instrument_version_code: str | None = None

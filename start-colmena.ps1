@@ -26,9 +26,9 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "  ya estaba corriendo."
 }
 
-Write-Host "[2/4] Backend (uvicorn, puerto 8000)..." -ForegroundColor Cyan
+Write-Host "[2/4] Backend (uvicorn, puerto 8001)..." -ForegroundColor Cyan
 $backendProc = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c", "poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000 > `"$LogDir\backend.log`" 2>&1" `
+    -ArgumentList "/c", "poetry run uvicorn app.main:app --host 0.0.0.0 --port 8001 > `"$LogDir\backend.log`" 2>&1" `
     -WorkingDirectory $Backend `
     -WindowStyle Hidden `
     -PassThru
@@ -68,7 +68,7 @@ if ($tunnelUrl) {
     Write-Host "=====================================================" -ForegroundColor Green
     Write-Host " Colmena corriendo en background."
     Write-Host " URL publica: $tunnelUrl"
-    Write-Host " Backend local:  http://localhost:8000/docs"
+    Write-Host " Backend local:  http://localhost:8001/docs"
     Write-Host " Frontend local: http://localhost:5174"
     Write-Host "=====================================================" -ForegroundColor Green
 } else {

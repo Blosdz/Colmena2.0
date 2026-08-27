@@ -21,7 +21,8 @@ class StudyRepository:
             .options(
                 selectinload(Study.instrument_version).selectinload(
                     InstrumentVersion.instrument
-                )
+                ),
+                selectinload(Study.analytics_plan),
             )
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
@@ -33,7 +34,8 @@ class StudyRepository:
             .options(
                 selectinload(Study.instrument_version).selectinload(
                     InstrumentVersion.instrument
-                )
+                ),
+                selectinload(Study.analytics_plan),
             )
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
@@ -49,7 +51,8 @@ class StudyRepository:
             .options(
                 selectinload(Study.instrument_version).selectinload(
                     InstrumentVersion.instrument
-                )
+                ),
+                selectinload(Study.analytics_plan),
             )
             .order_by(Study.created_at.desc())
         )

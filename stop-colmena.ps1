@@ -1,4 +1,5 @@
-$PidDir = "D:\Colmena2.0\run"
+$Root   = $PSScriptRoot
+$PidDir = Join-Path $Root "run"
 $PgCtl  = "D:\APPTHESIS\.tools\pgsql\bin\pg_ctl.exe"
 $PgData = "D:\APPTHESIS\.tools\pgsql\data"
 

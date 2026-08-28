@@ -10,7 +10,8 @@ $ErrorActionPreference = "SilentlyContinue"
 
 $PgCtl  = "D:\APPTHESIS\.tools\pgsql\bin\pg_ctl.exe"
 $PgData = "D:\APPTHESIS\.tools\pgsql\data"
-$Nssm   = (Get-Command nssm -ErrorAction SilentlyContinue).Source
+$LocalNssm = Join-Path $PSScriptRoot ".tools\nssm.exe"
+$Nssm = if (Test-Path $LocalNssm) { $LocalNssm } else { (Get-Command nssm -ErrorAction SilentlyContinue).Source }
 
 foreach ($s in @("colmena-tunnel", "colmena-frontend", "colmena-backend")) {
     if (Get-Service -Name $s -ErrorAction SilentlyContinue) {

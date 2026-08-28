@@ -36,7 +36,19 @@ function Resolve-Bin($name, $hint) {
     return $c.Source
 }
 
-$Nssm        = Resolve-Bin "nssm"        "Descargalo de https://nssm.cc/download y pon nssm.exe en una carpeta del PATH."
+# nssm: primero una copia local del proyecto, luego el PATH
+$LocalNssm = Join-Path $PSScriptRoot ".tools\nssm.exe"
+if (Test-Path $LocalNssm) {
+    $Nssm = $LocalNssm
+} else {
+    $c = Get-Command nssm -ErrorAction SilentlyContinue
+    if (-not $c) {
+        throw "No se encontro nssm. Descargalo con el bloque del README a $LocalNssm, o instala con 'winget install --id NSSM.NSSM -e'."
+    }
+    $Nssm = $c.Source
+}
+Write-Host "  nssm: $Nssm"
+
 $Cloudflared = Resolve-Bin "cloudflared" "Descargalo de https://github.com/cloudflare/cloudflared/releases/latest"
 $Node        = Resolve-Bin "node"        "Instala Node.js (el instalador lo agrega al PATH de la maquina)."
 $Poetry      = Resolve-Bin "poetry"      "Instala poetry: https://python-poetry.org/docs/#installation"

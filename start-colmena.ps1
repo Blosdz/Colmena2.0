@@ -1,80 +1,62 @@
 $ErrorActionPreference = "Stop"
 
-$PgCtl    = "D:\APPTHESIS\.tools\pgsql\bin\pg_ctl.exe"
-$PgData   = "D:\APPTHESIS\.tools\pgsql\data"
-$Backend  = "D:\Colmena2.0\backend"
-$Frontend = "D:\Colmena2.0\frontend"
-$LogDir   = "D:\Colmena2.0\logs"
-$PidDir   = "D:\Colmena2.0\run"
+# ============================================================================
+#  Arranca los servicios de Colmena y muestra la URL publica del tunnel.
+#  Requiere haber corrido install-colmena-services.ps1 UNA vez (como admin).
+#  Los servicios corren fuera de tu sesion: puedes cerrar SSH sin problema.
+# ============================================================================
 
-New-Item -ItemType Directory -Force -Path $LogDir, $PidDir | Out-Null
+$LogDir  = "D:\Colmena2.0\logs"
+$Tunnel  = "colmena-tunnel"
+$Order   = @("colmena-postgres", "colmena-backend", "colmena-frontend", "colmena-tunnel")
 
-if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
-    Write-Host "cloudflared no esta instalado o no esta en el PATH." -ForegroundColor Red
-    Write-Host "Descargalo de:"
-    Write-Host "  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-    Write-Host "Renombralo a cloudflared.exe y ponlo en una carpeta que este en el PATH."
-    exit 1
+foreach ($s in $Order) {
+    $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
+    if (-not $svc) {
+        Write-Host "Servicio '$s' no instalado." -ForegroundColor Red
+        Write-Host "Corre primero (como administrador):  .\install-colmena-services.ps1" -ForegroundColor Red
+        exit 1
+    }
 }
 
-Write-Host "[1/4] PostgreSQL..." -ForegroundColor Cyan
-& $PgCtl -D $PgData status | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    & $PgCtl -D $PgData start
-    Start-Sleep -Seconds 3
-} else {
-    Write-Host "  ya estaba corriendo."
+# reiniciar el tunnel para forzar una URL fresca de trycloudflare
+$t = Get-Service -Name $Tunnel
+if ($t.Status -eq 'Running') { Stop-Service $Tunnel; Start-Sleep -Seconds 1 }
+if (Test-Path "$LogDir\$Tunnel.log") { Clear-Content "$LogDir\$Tunnel.log" -ErrorAction SilentlyContinue }
+
+foreach ($s in $Order) {
+    $svc = Get-Service -Name $s
+    if ($svc.Status -ne 'Running') {
+        Start-Service $s
+        Write-Host "Iniciado  $s" -ForegroundColor Green
+    } else {
+        Write-Host "Ya activo $s"
+    }
 }
 
-Write-Host "[2/4] Backend (uvicorn, puerto 8001)..." -ForegroundColor Cyan
-$backendProc = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c", "poetry run uvicorn app.main:app --host 0.0.0.0 --port 8001 > `"$LogDir\backend.log`" 2>&1" `
-    -WorkingDirectory $Backend `
-    -WindowStyle Hidden `
-    -PassThru
-$backendProc.Id | Out-File "$PidDir\backend.pid"
-
-Write-Host "[3/4] Frontend (vite, puerto 5174)..." -ForegroundColor Cyan
-$frontendProc = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c", "npm run dev > `"$LogDir\frontend.log`" 2>&1" `
-    -WorkingDirectory $Frontend `
-    -WindowStyle Hidden `
-    -PassThru
-$frontendProc.Id | Out-File "$PidDir\frontend.pid"
-
-Write-Host "  esperando a que backend/frontend levanten (8s)..."
-Start-Sleep -Seconds 8
-
-Write-Host "[4/4] Cloudflare Tunnel (frontend, puerto 5174)..." -ForegroundColor Cyan
-$tunnelProc = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c", "cloudflared tunnel --url http://localhost:5174 > `"$LogDir\cloudflared.log`" 2>&1" `
-    -WindowStyle Hidden `
-    -PassThru
-$tunnelProc.Id | Out-File "$PidDir\cloudflared.pid"
-
-Write-Host "  esperando la URL publica..."
+Write-Host ""
+Write-Host "Esperando la URL publica del tunnel..."
+$log = "$LogDir\$Tunnel.log"
 $tunnelUrl = $null
-for ($i = 0; $i -lt 25; $i++) {
+for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
-    $log = Get-Content "$LogDir\cloudflared.log" -Raw -ErrorAction SilentlyContinue
-    if ($log -match 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com') {
-        $tunnelUrl = $Matches[0]
-        break
+    if (Test-Path $log) {
+        $m = Select-String -Path $log -Pattern 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com' -ErrorAction SilentlyContinue |
+             Select-Object -Last 1
+        if ($m) { $tunnelUrl = $m.Matches[0].Value; break }
     }
 }
 
 Write-Host ""
 if ($tunnelUrl) {
     Write-Host "=====================================================" -ForegroundColor Green
-    Write-Host " Colmena corriendo en background."
-    Write-Host " URL publica: $tunnelUrl"
+    Write-Host " Colmena corriendo como servicios de Windows."
+    Write-Host " URL publica:    $tunnelUrl"
     Write-Host " Backend local:  http://localhost:8001/docs"
     Write-Host " Frontend local: http://localhost:5174"
     Write-Host "=====================================================" -ForegroundColor Green
 } else {
-    Write-Host "No se detecto la URL del tunnel a tiempo. Revisa $LogDir\cloudflared.log" -ForegroundColor Yellow
+    Write-Host "No se detecto la URL del tunnel a tiempo. Revisa $log" -ForegroundColor Yellow
 }
-
 Write-Host ""
-Write-Host "Logs en: $LogDir"
-Write-Host "Para detener todo: powershell -File D:\Colmena2.0\stop-colmena.ps1"
+Write-Host "Logs en: $LogDir     Detener: .\stop-colmena.ps1"

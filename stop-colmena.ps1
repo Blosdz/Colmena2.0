@@ -1,18 +1,21 @@
-$PidDir = "D:\Colmena2.0\run"
-$PgCtl  = "D:\APPTHESIS\.tools\pgsql\bin\pg_ctl.exe"
-$PgData = "D:\APPTHESIS\.tools\pgsql\data"
+# ============================================================================
+#  Detiene los servicios de Colmena. PostgreSQL se deja corriendo por
+#  defecto (es un servicio, no molesta). Usa -All para detenerlo tambien.
+# ============================================================================
+param([switch]$All)
 
-foreach ($name in "cloudflared", "frontend", "backend") {
-    $pidFile = "$PidDir\$name.pid"
-    if (Test-Path $pidFile) {
-        $procId = Get-Content $pidFile
-        & taskkill /PID $procId /T /F 2>$null | Out-Null
-        Write-Host "Detenido $name (PID $procId)"
-        Remove-Item $pidFile
+$ErrorActionPreference = "SilentlyContinue"
+
+$Order = @("colmena-tunnel", "colmena-frontend", "colmena-backend")
+if ($All) { $Order += "colmena-postgres" }
+
+foreach ($s in $Order) {
+    $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
+    if (-not $svc) { Write-Host "$s no instalado"; continue }
+    if ($svc.Status -eq 'Running') {
+        Stop-Service $s -Force
+        Write-Host "Detenido $s"
     } else {
-        Write-Host "$name no tenia pid file (ya estaba detenido)"
+        Write-Host "$s ya estaba detenido"
     }
 }
-
-Write-Host "Deteniendo PostgreSQL..."
-& $PgCtl -D $PgData stop
